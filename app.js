@@ -176,7 +176,10 @@ class Board {
     this.grid.innerHTML = html;
     this.drawArrows(); this.size(); this.updEval();
   }
+  setEvalHidden(h){ this.evalHidden = h; this.evKey = null; this.evShown = undefined; this.updEval(); }
   updEval(){
+    this.ebar.classList.toggle("hid", !!this.evalHidden);
+    if (this.evalHidden) { this.evKey = null; this.ebar.lastChild.textContent = "?"; this.ebar.lastChild.className = "mid"; this.ebar.title = "Ocena ukryta do Twojego pierwszego ruchu"; return; }
     const g = this.game; const fen = g.fen(); const key = fen.split(" ").slice(0,4).join(" ");
     if (key === this.evKey) { if (this.evShown !== undefined) this.showEval(this.evShown); return; } this.evKey = key; this.evShown = undefined;
     let wk = 0, bk = 0; for (let r=1;r<=8;r++) for (let f=0;f<8;f++){ const p = g.get("abcdefgh"[f]+r); if (p && p.type === "k") { if (p.color === "w") wk++; else bk++; } }
@@ -594,7 +597,7 @@ function viewExercise(id){
     const hb = $("#histBox"); let built = false;
     hb.addEventListener("toggle", () => { if (hb.open && !built) { built = true; linePlayer($("#histHost"), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", e.hist, { orient:e.c, startIdx: e.hist.length - 1 }); } });
   } else if (e.lastSan) $("#lastmv").innerHTML = 'Ostatni ruch przeciwnika: <span class="mv">' + fmtSan(e.lastSan) + "</span>";
-  const board = new Board($("#bHost"), { orient:e.c });
+  const board = new Board($("#bHost"), { orient:e.c }); board.evalHidden = true;
   let attempt = 0;
   function drawMis(){
     const on = isMis(e.id);
@@ -604,16 +607,16 @@ function viewExercise(id){
     $("#misB").addEventListener("click", () => { if (isMis(e.id)) delete S.mis[e.id]; else S.mis[e.id] = Date.now(); save(); toast(isMis(e.id) ? "Oznaczono jako misclick" : "Przywrócono do treningu"); drawMis(); });
   }
   drawMis();
-  function reset(){ board.set(e.fen, { orient:e.c, last:e.last, interactive:true, onMove }); $("#exMsg").innerHTML = ""; $("#exBtns").classList.remove("hide"); }
+  function reset(){ board.evalHidden = true; board.set(e.fen, { orient:e.c, last:e.last, interactive:true, onMove }); $("#exMsg").innerHTML = ""; $("#exBtns").classList.remove("hide"); }
   reset();
   if (S.settings.engine) Engine.ready().then(updEngineBadge);
   $("#hintB").addEventListener("click", () => { $("#hintBox").innerHTML = '<div class="verdict mid">💡 ' + rich(e.hint) + "</div>"; });
-  $("#giveB").addEventListener("click", () => { record(false, null); reveal(null, null); });
+  $("#giveB").addEventListener("click", () => { record(false, null); board.setEvalHidden(false); reveal(null, null); });
   function record(ok, san){
     const r = S.ex[e.id] || { tries:0 }; r.tries++; if (r.first === undefined) r.first = ok; if (ok) r.solved = true; r.ts = Date.now(); r.lastSan = san; S.ex[e.id] = r; save();
   }
   async function onMove(m){
-    board.interactive = false; attempt++;
+    board.interactive = false; attempt++; board.setEvalHidden(false);
     const bestSan = e.best[0];
     const strip = s => s.replace(/[+#]/g,"");
     if (strip(m.san) === strip(bestSan)) { record(true, m.san); return reveal(m, { kind:"ok" }); }
