@@ -179,7 +179,7 @@ class Board {
   setEvalHidden(h){ this.evalHidden = h; this.evKey = null; this.evShown = undefined; this.updEval(); }
   updEval(){
     this.ebar.classList.toggle("hid", !!this.evalHidden);
-    if (this.evalHidden) { this.evKey = null; this.ebar.lastChild.textContent = "?"; this.ebar.lastChild.className = "mid"; this.ebar.title = "Ocena ukryta do Twojego pierwszego ruchu"; return; }
+    if (this.evalHidden) { this.evKey = null; this.ebar.lastChild.textContent = "?"; this.ebar.lastChild.className = "ev-lbl ev-mid"; this.ebar.title = "Ocena ukryta do Twojego pierwszego ruchu"; return; }
     const g = this.game; const fen = g.fen(); const key = fen.split(" ").slice(0,4).join(" ");
     if (key === this.evKey) { if (this.evShown !== undefined) this.showEval(this.evShown); return; } this.evKey = key; this.evShown = undefined;
     let wk = 0, bk = 0; for (let r=1;r<=8;r++) for (let f=0;f<8;f++){ const p = g.get("abcdefgh"[f]+r); if (p && p.type === "k") { if (p.color === "w") wk++; else bk++; } }
@@ -198,20 +198,26 @@ class Board {
   }
   showEval(cpW, label, pending){
     const i = this.ebar.firstChild, sp = this.ebar.lastChild;
-    let share = 50, txt = label || "";
+    // podczas liczenia pokazujemy ostatnią znaną ocenę (przyciemnioną), żeby liczba była zawsze widoczna
+    if ((cpW === null || cpW === undefined) && pending && this.evLast !== undefined) cpW = this.evLast;
+    let share = 50, txt = label && label !== "…" ? label : "…";
     if (cpW !== null && cpW !== undefined) {
       this.evLast = cpW; if (!pending) this.evShown = cpW;
-      if (Math.abs(cpW) >= 9000) { const n = Math.round((10000 - Math.abs(cpW)) / 10); share = cpW > 0 ? 100 : 0; txt = n ? "M" + n : "#"; }
-      else { share = 50 + 50 * (2 / (1 + Math.exp(-cpW / 250)) - 1); txt = (Math.abs(cpW) < 5 ? "0,0" : (Math.abs(cpW) / 100).toFixed(1).replace(".", ",")); }
-      if (label) txt = label;
+      if (Math.abs(cpW) >= 9000) { const n = Math.round((10000 - Math.abs(cpW)) / 10); share = cpW > 0 ? 100 : 0; txt = (cpW > 0 ? "+" : "−") + (n ? "M" + n : "#"); }
+      else {
+        share = 50 + 50 * (2 / (1 + Math.exp(-cpW / 250)) - 1);
+        const a = Math.abs(cpW) / 100;
+        txt = a < 0.05 ? "0,0" : (cpW > 0 ? "+" : "−") + (a >= 10 ? Math.round(a) : a.toFixed(1).replace(".", ","));
+      }
     }
     const flip = this.orient === "b";
     i.style.height = share + "%"; i.style.top = flip ? "0" : "auto"; i.style.bottom = flip ? "auto" : "0";
     const whiteAhead = (cpW || 0) >= 0;
-    // etykieta po stronie strony, która prowadzi
-    const atBottom = flip ? !whiteAhead : whiteAhead;
-    sp.textContent = txt; sp.className = (atBottom ? "bot" : "top") + (whiteAhead ? " onw" : " onb") + (pending ? " pend" : "");
-    this.ebar.title = "Ocena silnika: " + (cpW === null || cpW === undefined ? "brak" : (cpW >= 0 ? "+" : "−") + txt.replace(/^[+−-]/, "")) + " (z punktu widzenia białych)";
+    const atBottom = flip ? !whiteAhead : whiteAhead;   // liczba po stronie koloru, który prowadzi
+    sp.textContent = txt;
+    sp.className = "ev-lbl " + (atBottom ? "ev-bot" : "ev-top") + (whiteAhead ? " ev-onw" : " ev-onb") + (pending ? " ev-pend" : "");
+    const who = cpW === null || cpW === undefined ? "brak oceny" : Math.abs(cpW) < 5 ? "równo" : (whiteAhead ? "przewaga białych" : "przewaga czarnych");
+    this.ebar.title = "Ocena silnika: " + txt + " (" + who + ")";
   }
   xy(sq){ const f = "abcdefgh".indexOf(sq[0]), r = +sq[1]; return this.orient === "w" ? [f + .5, 8 - r + .5] : [7 - f + .5, r - 1 + .5]; }
   drawArrows(){
