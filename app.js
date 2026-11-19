@@ -109,10 +109,11 @@ const Engine = {
     }
     if (s.startsWith("bestmove")) { clearTimeout(c.to); this.cur = null; c.resolve({ cp: c.cp, pv: c.pv || [s.split(" ")[1]], best: s.split(" ")[1] }); this._next(); }
   },
-  eval(fen, ms){
+  eval(fen, ms, key){
     return new Promise(resolve => {
       if (HAS_CHESS) { const g = new Chess(fen); if (g.in_checkmate()) return resolve({ cp:-10000, pv:[], best:null }); if (g.in_draw() || g.in_stalemate()) return resolve({ cp:0, pv:[], best:null }); }
-      this.q.push({ fen, ms: ms || 1000, resolve, cp:null });
+      if (key) { this.q = this.q.filter(j => { if (j.key === key) { j.resolve(null); return false; } return true; }); }
+      this.q.push({ fen, ms: ms || 1000, resolve, cp:null, key });
       this.start(); this._next();
     });
   },
@@ -129,14 +130,17 @@ function engLabel(){ if (!S.settings.engine) return "wyłączony"; return ({ idl
 function uciToSanLine(fen, uciList, n){ const g = new Chess(fen); const out = []; for (const u of (uciList||[]).slice(0, n)) { const m = g.move({ from:u.slice(0,2), to:u.slice(2,4), promotion:u[4] || "q" }); if (!m) break; out.push(m.san); } return out; }
 
 /* ---------------- board ---------------- */
+const EVCACHE = new Map();
 const GL = { k:["♚","♔"], q:["♛","♕"], r:["♜","♖"], b:["♝","♗"], n:["♞","♘"], p:["♟","♙"] };
 class Board {
   constructor(host, opt={}){
     this.host = host; this.opt = opt; this.orient = opt.orient || "w";
+    this.outer = document.createElement("div"); this.outer.className = "bouter";
+    this.ebar = document.createElement("div"); this.ebar.className = "ebar"; this.ebar.innerHTML = '<i></i><span></span>'; this.ebar.title = "Ocena silnika";
     this.wrap = document.createElement("div"); this.wrap.className = "boardwrap";
     this.grid = document.createElement("div"); this.grid.className = "board"; this.wrap.appendChild(this.grid);
     this.svg = document.createElementNS("http://www.w3.org/2000/svg","svg"); this.svg.setAttribute("class","arrows"); this.svg.setAttribute("viewBox","0 0 8 8"); this.wrap.appendChild(this.svg);
-    host.appendChild(this.wrap);
+    this.outer.appendChild(this.ebar); this.outer.appendChild(this.wrap); host.appendChild(this.outer);
     this.sel = null; this.interactive = false; this.last = null; this.arrows = []; this.flashSq = null; this.uid = "ah" + Math.random().toString(36).slice(2,8);
     this.grid.addEventListener("click", e => { const sq = e.target.closest(".sq"); if (sq) this.tap(sq.dataset.sq); });
     this.ro = () => this.size(); window.addEventListener("resize", this.ro);
@@ -170,7 +174,41 @@ class Board {
       html += '<div class="' + cls + '" data-sq="' + sq + '">' + inner + "</div>";
     }
     this.grid.innerHTML = html;
-    this.drawArrows(); this.size();
+    this.drawArrows(); this.size(); this.updEval();
+  }
+  updEval(){
+    const g = this.game; const fen = g.fen(); const key = fen.split(" ").slice(0,4).join(" ");
+    if (key === this.evKey) { if (this.evShown !== undefined) this.showEval(this.evShown); return; } this.evKey = key; this.evShown = undefined;
+    let wk = 0, bk = 0; for (let r=1;r<=8;r++) for (let f=0;f<8;f++){ const p = g.get("abcdefgh"[f]+r); if (p && p.type === "k") { if (p.color === "w") wk++; else bk++; } }
+    if (wk !== 1 || bk !== 1) { this.showEval(null, "–"); return; }
+    if (g.in_checkmate()) { this.showEval(g.turn() === "w" ? -10000 : 10000); return; }
+    if (g.in_stalemate() || g.in_draw()) { this.showEval(0); return; }
+    if (EVCACHE.has(key)) { this.showEval(EVCACHE.get(key)); return; }
+    if (!S.settings.engine) { this.showEval(null, "–"); return; }
+    this.showEval(this.evLast === undefined ? null : this.evLast, "…", true);
+    const t = key; Engine.eval(fen, 900, this.uid).then(r => {
+      if (!r) { if (this.evKey === t && Engine.state === "failed") this.showEval(null, "–"); return; }
+      const turn = t.split(" ")[1]; const val = turn === "w" ? r.cp : -r.cp;
+      if (EVCACHE.size > 800) EVCACHE.clear(); EVCACHE.set(t, val);
+      if (this.evKey === t) this.showEval(val);
+    });
+  }
+  showEval(cpW, label, pending){
+    const i = this.ebar.firstChild, sp = this.ebar.lastChild;
+    let share = 50, txt = label || "";
+    if (cpW !== null && cpW !== undefined) {
+      this.evLast = cpW; if (!pending) this.evShown = cpW;
+      if (Math.abs(cpW) >= 9000) { const n = Math.round((10000 - Math.abs(cpW)) / 10); share = cpW > 0 ? 100 : 0; txt = n ? "M" + n : "#"; }
+      else { share = 50 + 50 * (2 / (1 + Math.exp(-cpW / 250)) - 1); txt = (Math.abs(cpW) < 5 ? "0,0" : (Math.abs(cpW) / 100).toFixed(1).replace(".", ",")); }
+      if (label) txt = label;
+    }
+    const flip = this.orient === "b";
+    i.style.height = share + "%"; i.style.top = flip ? "0" : "auto"; i.style.bottom = flip ? "auto" : "0";
+    const whiteAhead = (cpW || 0) >= 0;
+    // etykieta po stronie strony, która prowadzi
+    const atBottom = flip ? !whiteAhead : whiteAhead;
+    sp.textContent = txt; sp.className = (atBottom ? "bot" : "top") + (whiteAhead ? " onw" : " onb") + (pending ? " pend" : "");
+    this.ebar.title = "Ocena silnika: " + (cpW === null || cpW === undefined ? "brak" : (cpW >= 0 ? "+" : "−") + txt.replace(/^[+−-]/, "")) + " (z punktu widzenia białych)";
   }
   xy(sq){ const f = "abcdefgh".indexOf(sq[0]), r = +sq[1]; return this.orient === "w" ? [f + .5, 8 - r + .5] : [7 - f + .5, r - 1 + .5]; }
   drawArrows(){
