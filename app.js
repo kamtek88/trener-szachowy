@@ -59,6 +59,7 @@ function evalWords(cp, me){ // cp from "me" perspective
 }
 const PH = { open:"Otwarcie", mid:"Gra środkowa", end:"Końcówka" };
 const PHTAB = { open:"otwarcie", mid:"srodek", end:"koncowka" };
+const PHBACK = { open:"otwarcie-plan", mid:"srodek", end:"koncowka" };
 const RES = { W:"wygrana", L:"przegrana", D:"remis" };
 function fmtDate(d){ const [y,m,dd] = d.split("-"); return dd + "." + m + "." + y; }
 function allExercises(){ return D.exercises.concat(S.imported.exercises || []); }
@@ -285,7 +286,11 @@ function route(){
   if (h.startsWith("ex-")) return viewExercise(h.slice(3));
   if (h.startsWith("lesson-")) return viewLesson(h.slice(7));
   if (h.startsWith("rep-")) return viewRep(h.slice(4));
-  ({ start:viewStart, otwarcie:()=>viewPhase("open"), srodek:()=>viewPhase("mid"), koncowka:()=>viewPhase("end"), postepy:viewProgress, notacja:viewNotation }[h] || viewStart)();
+  if (h.startsWith("opv-")) { const [oid, vid] = h.slice(4).split("--"); return viewOpVariant(oid, vid); }
+  if (h.startsWith("op-")) return viewOpening(h.slice(3));
+  if (h === "otwarcie-plan") return viewPhase("open", "plan");
+  if (h === "otwarcie-rep") return viewPhase("open", "rep");
+  ({ start:viewStart, otwarcie:()=>viewPhase("open", "moje"), srodek:()=>viewPhase("mid"), koncowka:()=>viewPhase("end"), postepy:viewProgress, notacja:viewNotation }[h] || viewStart)();
 }
 
 /* ---------------- views: start ---------------- */
@@ -329,7 +334,7 @@ function viewStart(){
       <li><b>Wczesny hetman.</b> W Gambicie Przyjętym (4–0–10) i w innych otwarciach często wychodzisz hetmanem przed roszadą.</li>
       <li><b>Czarne:</b> w Sycylijskiej otwartej masz 21–0–12, ale w bocznych wariantach 13–3–27, a przeciw 1.d4 brakuje Ci stałego systemu.</li>
     </ul>
-    <div class="row" style="margin-top:12px"><button class="btn sec" data-go="srodek">Plan: gra środkowa</button><button class="btn sec" data-go="otwarcie">Repertuar</button></div>
+    <div class="row" style="margin-top:12px"><button class="btn sec" data-go="srodek">Plan: gra środkowa</button><button class="btn sec" data-go="otwarcie">Moje otwarcia</button></div>
   </div>
   <div class="card">
     <div class="kicker">Postęp</div>
@@ -354,11 +359,17 @@ function exItem(e){
 }
 
 /* ---------------- views: phase ---------------- */
-function viewPhase(ph){
-  setTab(PHTAB[ph]); $("#ttl").textContent = PH[ph];
+function segBar(active){
+  const items = [["moje","Moje otwarcia","otwarcie"],["plan","Plan i ćwiczenia","otwarcie-plan"],["rep","Repertuar","otwarcie-rep"]];
+  return '<div class="seg">' + items.map(([k,l,h]) => '<button class="' + (k === active ? "on" : "") + '" data-go="' + h + '">' + l + "</button>").join("") + "</div>";
+}
+function viewPhase(ph, sub){
+  setTab(PHTAB[ph]); $("#ttl").textContent = ph === "open" ? "Otwarcia" : PH[ph];
+  if (ph === "open" && sub === "moje") return viewMyOpenings();
+  if (ph === "open" && sub === "rep") { app.innerHTML = segBar("rep") + repCard(); bindGo(app); return; }
   const P = D.plan[ph]; const exs0 = allExercises().filter(e => e.ph === ph); const exs = exs0.filter(e => !isMis(e.id)).concat(exs0.filter(e => isMis(e.id)));
   const doneSteps = S.plan[ph] || {};
-  app.innerHTML = `
+  app.innerHTML = (ph === "open" ? segBar("plan") : "") + `
   <div class="card">
     <div class="kicker">Diagnoza z Twoich partii</div>
     <h2>${PH[ph]}: co się dzieje</h2>
@@ -369,7 +380,6 @@ function viewPhase(ph){
     <h2>Co robimy</h2>
     <ol class="steps">${P.steps.map((s,i) => `<li><b>${esc(s.t)}</b><span class="small">${rich(s.d)}</span><div style="margin-top:6px"><label style="display:inline-flex;gap:8px;align-items:center;font-size:14px;cursor:pointer;min-height:36px"><input type="checkbox" data-st="${i}" ${doneSteps[i]?"checked":""} style="width:20px;height:20px"> wdrażam to</label></div></li>`).join("")}</ol>
   </div>
-  ${ph === "open" ? repCard() : ""}
   <div class="card">
     <div class="kicker">Ćwiczenia z Twoich partii</div>
     <h2>Zagraj jeszcze raz</h2>
@@ -381,6 +391,42 @@ function viewPhase(ph){
   app.querySelectorAll("[data-st]").forEach(c => c.addEventListener("change", () => { S.plan[ph] = S.plan[ph] || {}; S.plan[ph][c.dataset.st] = c.checked; save(); }));
   bindGo(app);
 }
+/* ---------------- views: moje otwarcia ---------------- */
+function wdlTxt(o){ return o.w + "–" + o.d + "–" + o.l; }
+function viewMyOpenings(){
+  const O = D.openings || [];
+  app.innerHTML = segBar("moje") + `<div class="card"><div class="kicker">Z Twoich partii</div><h2>Otwarcia, które grasz</h2><p class="small muted" style="margin:0">Każde otwarcie ma 5 wariantów, które najczęściej pojawiały się w Twoich partiach. Każdy wariant jest pokazany do 6. posunięcia, z komentarzem do każdego ruchu: dlaczego się go gra i co daje.</p></div>` +
+    O.map(o => `<button class="item" data-go="op-${o.id}" style="margin-bottom:10px"><span class="badge" style="font-family:'Noto Sans Symbols 2';font-size:22px">${o.color === "w" ? "♔" : "♚"}</span><span class="t"><b>${esc(o.name)}</b><span>${o.color === "w" ? "białymi" : "czarnymi"} · ${o.games} partii · wynik ${wdlTxt(o)}</span><div style="margin-top:6px">${wdlBar(o.w,o.d,o.l)}</div></span><span class="chev">›</span></button>`).join("") +
+    `<div class="legend"><span><i style="background:var(--ok)"></i>wygrane</span><span><i style="background:#b9b3a2"></i>remisy</span><span><i style="background:var(--bad)"></i>porażki</span></div>`;
+  bindGo(app);
+}
+function viewOpening(id){
+  const o = (D.openings || []).find(x => x.id === id); if (!o) return viewMyOpenings();
+  setTab("otwarcie"); $("#ttl").textContent = "Otwarcia";
+  app.innerHTML = `<button class="back" data-go="otwarcie">‹ Moje otwarcia</button>
+  <div class="card"><div class="kicker">${o.color === "w" ? "Grasz białymi" : "Grasz czarnymi"} · ${o.games} partii · ${wdlTxt(o)}</div><h2>${esc(o.name)}</h2>${wdlBar(o.w,o.d,o.l)}<div style="margin-top:10px">${o.intro.map(x => "<p style='margin:0 0 8px'>" + rich(x) + "</p>").join("")}</div></div>
+  <div class="card"><div class="kicker">Najczęstsze warianty w Twoich partiach</div><div class="list">${o.variants.map((v,i) => `<button class="item" data-go="opv-${o.id}--${v.id}"><span class="badge">${i+1}</span><span class="t"><b>${esc(v.name)}</b><span>${v.stats.n} partii · ${wdlTxt(v.stats)}</span><div style="margin-top:6px">${wdlBar(v.stats.w,v.stats.d,v.stats.l)}</div></span><span class="chev">›</span></button>`).join("")}</div></div>
+  <div id="startHost"></div>`;
+  bindGo(app);
+  const c = document.createElement("div"); c.className = "card"; c.innerHTML = '<div class="sec-title">Pozycja po pierwszych ruchach</div>'; $("#startHost").appendChild(c);
+  linePlayer(c, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", o.base, { orient:o.color, notes:o.baseNotes, startIdx:o.base.length - 1 });
+}
+function viewOpVariant(oid, vid){
+  const o = (D.openings || []).find(x => x.id === oid); const v = o && o.variants.find(x => x.id === vid); if (!v) return viewMyOpenings();
+  setTab("otwarcie"); $("#ttl").textContent = "Otwarcia";
+  const i = o.variants.indexOf(v); const nx = o.variants[i+1];
+  app.innerHTML = `<button class="back" data-go="op-${o.id}">‹ ${esc(o.name)}</button>
+  <div class="card"><div class="kicker">${esc(o.name)} · wariant ${i+1} z ${o.variants.length}</div><h2>${esc(v.name)}</h2>
+  <p class="small muted" style="margin:0 0 6px">W Twoich partiach: ${v.stats.n} razy, wynik ${wdlTxt(v.stats)}${v.stats.note ? " · " + esc(v.stats.note) : ""}</p>${wdlBar(v.stats.w,v.stats.d,v.stats.l)}
+  <div class="tagline" style="margin-top:8px"><span class="pill" style="background:#dcefe2;color:#174d2d">✓ Sprawdzone: ${esc(v.verified || "")}</span></div></div>
+  <div class="card" id="lpHost"><div class="sec-title">Ruch po ruchu (naciśnij ▶)</div></div>
+  <div class="card"><div class="kicker">Czego się spodziewać</div><h2>Po tym wariancie</h2>${v.expect.map(x => "<p style='margin:0 0 8px'>" + rich(x) + "</p>").join("")}</div>
+  <div class="card"><div class="kicker">Ćwiczenie</div><h2>Zagraj wariant z pamięci</h2><p class="muted small" style="margin-top:0">Grasz swoje ruchy, a aplikacja odpowiada za przeciwnika.</p><div id="drill"></div></div>
+  ${nx ? `<button class="btn" data-go="opv-${o.id}--${nx.id}">Następny wariant: ${esc(nx.name)} ›</button>` : `<button class="btn sec" data-go="op-${o.id}">Wróć do listy wariantów</button>`}`;
+  bindGo(app);
+  linePlayer($("#lpHost"), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", v.moves, { orient:o.color, notes:v.notes });
+  repDrill($("#drill"), { moves:v.moves, color:o.color, name:v.name });
+}
 function repCard(){
   return `<div class="card"><div class="kicker">Repertuar</div><h2>Twoje otwarcia</h2>
   <p class="muted small" style="margin-top:0">Zostają Gambit Hetmański i Sycylijska. Dochodzą dwa nowe otwarcia: <b>System Londyński</b> (białe) i <b>Obrona Słowiańska</b> (czarne). Każdy ruch jest pokazany na szachownicy i opisany słowami.</p>
@@ -389,9 +435,9 @@ function repCard(){
 }
 function viewRep(id){
   setTab("otwarcie"); let it; D.repertoire.forEach(g => g.items.forEach(x => { if (x.id === id) it = x; }));
-  if (!it) return viewPhase("open");
+  if (!it) return viewPhase("open", "rep");
   $("#ttl").textContent = "Repertuar";
-  app.innerHTML = `<button class="back" data-go="otwarcie">‹ Otwarcie</button>
+  app.innerHTML = `<button class="back" data-go="otwarcie-rep">‹ Repertuar</button>
   <div class="card"><div class="kicker">${it.color==="w"?"Grasz białymi":"Grasz czarnymi"} · <span class="pill ${it.tag==="NOWE"?"new":(it.tag==="Do poprawy"?"fix":"")}">${esc(it.tag)}</span></div><h2>${esc(it.name)}</h2><p style="margin:0">${rich(it.why)}</p></div>
   <div class="card" id="lpHost"><div class="sec-title">Przejdź wariant ruch po ruchu</div></div>
   <div class="card"><div class="kicker">Ćwiczenie</div><h2>Zagraj wariant z pamięci</h2><p class="muted small" style="margin-top:0">Grasz swoje ruchy, a aplikacja odpowiada za przeciwnika. Przy pomyłce pokażę właściwy ruch.</p><div id="drill"></div></div>`;
@@ -428,7 +474,7 @@ function viewExercise(id){
   setTab(PHTAB[e.ph]); $("#ttl").textContent = PH[e.ph];
   const list = allExercises().filter(x => x.ph === e.ph); const pos = list.indexOf(e);
   const me = e.c === "w" ? "białymi" : "czarnymi";
-  app.innerHTML = `<button class="back" data-go="${PHTAB[e.ph]}">‹ ${PH[e.ph]}</button>
+  app.innerHTML = `<button class="back" data-go="${PHBACK[e.ph]}">‹ ${PH[e.ph]}</button>
   <div class="card">
     <div class="kicker">Ćwiczenie ${pos+1} z ${list.length} · ${PH[e.ph]}</div>
     <h2 style="font-size:19px">Partia z ${esc(e.opp)} (${e.oe}), ${fmtDate(e.date)}</h2>
@@ -960,6 +1006,7 @@ window.__selfTest = function(){
   const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
   D.exercises.forEach(e => { const g = new Chess(); if (!g.load(e.fen)) errs.push(e.id + " FEN"); tryLine(e.fen, e.best, e.id + " best"); tryLine(e.fen, e.ref, e.id + " ref"); (e.alt||[]).forEach(a => tryLine(e.fen, a.moves, e.id + " alt")); if (e.hist.length) { const h = new Chess(); e.hist.forEach(s => h.move(s, { sloppy:true })); if (h.fen().split(" ").slice(0,4).join(" ") !== e.fen.split(" ").slice(0,4).join(" ")) errs.push(e.id + " hist->fen"); } const t = (e.whyBad + e.whyGood + e.hint).match(/\[\[([^\]]+)\]\]/g) || []; });
   D.repertoire.forEach(gr => gr.items.forEach(it => tryLine(START, it.moves, it.id)));
+  (D.openings||[]).forEach(o => { tryLine(START, o.base, o.id + " base"); if (o.variants.length !== 5) errs.push(o.id + " ma " + o.variants.length + " wariantów"); o.variants.forEach(v => { tryLine(START, v.moves, o.id + "/" + v.id); if (v.moves.length !== 12) errs.push(o.id + "/" + v.id + " długość " + v.moves.length); for (let i = 0; i < v.moves.length; i++) if (!v.notes[i]) errs.push(o.id + "/" + v.id + " brak komentarza do ruchu " + i); if (!v.moves.join(" ").startsWith(o.base.join(" "))) errs.push(o.id + "/" + v.id + " nie zaczyna się od bazy"); }); });
   D.notation.forEach(n => { if (n.moves) tryLine(START, n.moves, n.id); (n.items||[]).forEach((it,i) => { if (it.fen) tryLine(it.fen, [it.san], n.id + "#" + i); }); });
   return errs.length ? errs : "OK";
 };
