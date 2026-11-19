@@ -1,6 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
+const APP_VERSION = "20261119184920";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -1116,6 +1117,18 @@ window.__selfTest = function(){
   return errs.length ? errs : "OK";
 };
 
+/* ---------------- automatyczna aktualizacja (GitHub Pages) ---------------- */
+// Telefon może trzymać stare pliki w pamięci. Sprawdzamy numer wersji na serwerze i w razie różnicy przeładowujemy stronę z nowymi plikami.
+(function checkVersion(){
+  if (!/^https?:/.test(location.protocol) || /claude|claudeusercontent/.test(location.hostname)) return;
+  fetch("version.json?t=" + Date.now(), { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => {
+    if (!j || !j.v || j.v === APP_VERSION) return;
+    let tried = null; try { tried = sessionStorage.getItem("kt-upd"); } catch(e) {}
+    if (tried === j.v) return;               // już próbowaliśmy, nie zapętlaj
+    try { sessionStorage.setItem("kt-upd", j.v); } catch(e) {}
+    location.replace(location.pathname + "?v=" + encodeURIComponent(j.v) + location.hash);
+  }).catch(() => {});
+})();
 route();
 if (S.settings.engine) setTimeout(() => Engine.start(), 1500);
 })();
