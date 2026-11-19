@@ -142,7 +142,7 @@ class Board {
     this.ro = () => this.size(); window.addEventListener("resize", this.ro);
   }
   size(){ const w = this.wrap.clientWidth || 320; this.wrap.style.setProperty("--sqs", (w/8) + "px"); }
-  set(fen, o={}){ this.game = new Chess(); if (!this.game.load(fen)) this.game.clear(); if (o.orient) this.orient = o.orient; this.last = o.last || null; this.arrows = o.arrows || []; this.interactive = !!o.interactive; this.onMove = o.onMove || null; this.sel = null; this.render(); }
+  set(fen, o={}){ this.game = new Chess(); if (!this.game.load(fen)) this.game.clear(); if (o.orient) this.orient = o.orient; this.last = o.last || null; this.arrows = o.arrows || []; this.marks = o.marks || []; this.interactive = !!o.interactive; this.onMove = o.onMove || null; this.sel = null; this.render(); }
   sqName(i){ const f = i % 8, r = Math.floor(i / 8); return this.orient === "w" ? "abcdefgh"[f] + (8 - r) : "abcdefgh"[7 - f] + (r + 1); }
   render(){
     const g = this.game; let html = "";
@@ -175,12 +175,14 @@ class Board {
   xy(sq){ const f = "abcdefgh".indexOf(sq[0]), r = +sq[1]; return this.orient === "w" ? [f + .5, 8 - r + .5] : [7 - f + .5, r - 1 + .5]; }
   drawArrows(){
     let s = "";
+    (this.marks || []).forEach(mk => { const [x,y] = this.xy(mk.sq); const c = mk.c || "rgba(34,139,84,.9)"; s += '<circle cx="'+x+'" cy="'+y+'" r=".42" fill="'+c.replace(/[\d.]+\)$/, ".18)")+'" stroke="'+c+'" stroke-width=".07"/>'; });
     this.arrows.forEach((a, k) => {
-      const [x1,y1] = this.xy(a.f), [x2,y2] = this.xy(a.t); const dx = x2-x1, dy = y2-y1, L = Math.hypot(dx,dy) || 1;
-      const ex = x2 - dx/L*.32, ey = y2 - dy/L*.32;
+      const pts = (a.p || [a.f, a.t]).map(q => this.xy(q)); if (pts.length < 2) return;
       const col = a.c || "rgba(255,170,0,.85)"; const id = this.uid + "_" + k;
+      const [x0,y0] = pts[0], [x1,y1] = pts[1]; const L0 = Math.hypot(x1-x0, y1-y0) || 1; pts[0] = [x0 + (x1-x0)/L0*.15, y0 + (y1-y0)/L0*.15];
+      const n = pts.length - 1; const [xa,ya] = pts[n-1], [xb,yb] = pts[n]; const L1 = Math.hypot(xb-xa, yb-ya) || 1; pts[n] = [xb - (xb-xa)/L1*.32, yb - (yb-ya)/L1*.32];
       s += '<defs><marker id="'+id+'" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="'+col+'"/></marker></defs>';
-      s += '<line x1="'+(x1+dx/L*.15)+'" y1="'+(y1+dy/L*.15)+'" x2="'+ex+'" y2="'+ey+'" stroke="'+col+'" stroke-width=".17" stroke-linecap="round" marker-end="url(#'+id+')"/>';
+      s += '<polyline points="'+pts.map(q => q[0].toFixed(3)+","+q[1].toFixed(3)).join(" ")+'" fill="none" stroke="'+col+'" stroke-width=".16" stroke-linecap="round" stroke-linejoin="round"'+(a.dash ? ' stroke-dasharray=".28 .2"' : "")+' marker-end="url(#'+id+')"/>';
     });
     this.svg.innerHTML = s;
   }
@@ -391,6 +393,58 @@ function viewPhase(ph, sub){
   app.querySelectorAll("[data-st]").forEach(c => c.addEventListener("change", () => { S.plan[ph] = S.plan[ph] || {}; S.plan[ph][c.dataset.st] = c.checked; save(); }));
   bindGo(app);
 }
+/* ---------------- grafika: ocena, wyniki, plany, mapa ---------------- */
+const PLANCOL = { me:"rgba(34,139,84,.92)", opp:"rgba(214,120,20,.92)", warn:"rgba(200,45,35,.92)" };
+const PLANLBL = { me:"Twój plan", opp:"Plan przeciwnika", warn:"Uwaga" };
+function scorePct(o){ const n = o.w + o.d + o.l; return n ? Math.round((o.w + o.d/2) / n * 100) : 0; }
+function evalGauge(cpWhite, myColor){
+  const share = 50 + 50 * (2 / (1 + Math.exp(-cpWhite / 250)) - 1);
+  const mine = myColor === "w" ? cpWhite : -cpWhite;
+  const num = (cpWhite >= 0 ? "+" : "−") + (Math.abs(cpWhite) / 100).toFixed(1).replace(".", ",");
+  return `<div class="gauge"><div class="gauge-top"><span>Ocena silnika po 6. ruchu</span><b>${num}</b></div>
+    <div class="gbar"><i style="width:${share}%"></i><span class="gmid"></span><span class="gmark" style="left:${share}%"></span></div>
+    <div class="gauge-lbl"><span>białe</span><span>czarne</span></div>
+    <div class="gauge-txt">${esc(evalWords(mine).replace(/^./, c => c.toUpperCase()))}${Math.abs(mine) < 50 ? "" : ""} · grasz ${myColor === "w" ? "białymi" : "czarnymi"}</div></div>`;
+}
+function resultsViz(st, all){
+  const n = st.n || (st.w + st.d + st.l); const pv = scorePct(st), pa = scorePct(all);
+  const seg = (k, v, c, l) => v ? `<i style="flex:${v};background:${c}" title="${l}"></i>` : "";
+  return `<div class="res">
+    <div class="res-nums"><div><b style="color:var(--ok)">${st.w}</b><span>wygrane</span></div><div><b style="color:#8d8676">${st.d}</b><span>remisy</span></div><div><b style="color:var(--bad)">${st.l}</b><span>porażki</span></div></div>
+    <div class="res-bar">${seg("w", st.w, "var(--ok)", "wygrane")}${seg("d", st.d, "#b9b3a2", "remisy")}${seg("l", st.l, "var(--bad)", "porażki")}</div>
+    <div class="cmp"><div class="cmp-row"><span>Ten wariant</span><div class="cmp-bar"><i style="width:${pv}%;background:${pv >= pa ? "var(--ok)" : "var(--bad)"}"></i></div><b>${pv}%</b></div>
+    <div class="cmp-row"><span>Całe otwarcie</span><div class="cmp-bar"><i style="width:${pa}%;background:#9aa59d"></i></div><b>${pa}%</b></div></div>
+    <p class="small muted" style="margin:6px 0 0">Wynik % = (wygrane + ½ remisów) / ${n} partii.</p></div>`;
+}
+function plansViz(host, v, orient){
+  const plans = v.plans || []; if (!plans.length) return;
+  const wrap = document.createElement("div"); host.appendChild(wrap);
+  const chips = document.createElement("div"); chips.className = "planchips"; wrap.appendChild(chips);
+  const bh = document.createElement("div"); wrap.appendChild(bh);
+  const board = new Board(bh, { orient });
+  const cap = document.createElement("div"); cap.className = "plancap"; wrap.appendChild(cap);
+  const leg = document.createElement("div"); leg.className = "legend"; leg.style.marginTop = "8px";
+  leg.innerHTML = '<span><i style="background:' + PLANCOL.me + '"></i>Twój plan</span><span><i style="background:' + PLANCOL.opp + '"></i>przeciwnik</span><span><i style="background:' + PLANCOL.warn + '"></i>uwaga</span><span>━ ruch teraz</span><span>┅ plan na kolejne ruchy</span><span>◯ ważne pole</span>';
+  wrap.appendChild(leg);
+  chips.innerHTML = plans.map((p,i) => `<button data-i="${i}"><span class="dot" style="background:${PLANCOL[p.who]}"></span>${esc(p.t)}</button>`).join("");
+  function show(i){
+    const p = plans[i];
+    chips.querySelectorAll("button").forEach((b,j) => b.classList.toggle("on", j === i));
+    board.set(p.fen, { orient, arrows: p.a.map(a => ({ p:a.p, c:PLANCOL[a.who || p.who], dash:!a.s })), marks: p.m.map(q => ({ sq:q, c:PLANCOL[p.who] })) });
+    cap.innerHTML = `<div class="plancap-h" style="color:${PLANCOL[p.who]}">${PLANLBL[p.who]}</div><b>${esc(p.t)}</b><div>${rich(p.x)}</div>`;
+  }
+  chips.addEventListener("click", e => { const b = e.target.closest("button"); if (b) show(+b.dataset.i); });
+  show(0);
+}
+function variantMap(o){
+  const max = Math.max(...o.variants.map(v => v.stats.n));
+  const base = o.base.map((m,i) => { const ply = i; return (ply % 2 === 0 ? (ply/2+1) + "." : "") + m; }).join(" ");
+  return `<div class="vmap"><div class="vroot">${esc(base)}</div><div class="vbranches">${o.variants.map((v,i) => {
+    const w = Math.max(18, v.stats.n / max * 100);
+    return `<button class="vbr" data-go="opv-${o.id}--${v.id}"><span class="vname">${esc(v.name.split(" – ")[0])}<small>${esc(v.name.split(" – ")[1] || "")}</small></span>
+      <span class="vline"><span class="vbar" style="width:${w}%">${v.stats.w ? `<i style="flex:${v.stats.w};background:var(--ok)"></i>` : ""}${v.stats.d ? `<i style="flex:${v.stats.d};background:#b9b3a2"></i>` : ""}${v.stats.l ? `<i style="flex:${v.stats.l};background:var(--bad)"></i>` : ""}</span><span class="vnum">${v.stats.n} · ${scorePct(v.stats)}%</span></span></button>`; }).join("")}</div>
+    <p class="small muted" style="margin:8px 0 0">Długość paska = liczba partii, kolory = wyniki, procent = Twój wynik w wariancie.</p></div>`;
+}
 /* ---------------- views: moje otwarcia ---------------- */
 function wdlTxt(o){ return o.w + "–" + o.d + "–" + o.l; }
 function viewMyOpenings(){
@@ -405,7 +459,7 @@ function viewOpening(id){
   setTab("otwarcie"); $("#ttl").textContent = "Otwarcia";
   app.innerHTML = `<button class="back" data-go="otwarcie">‹ Moje otwarcia</button>
   <div class="card"><div class="kicker">${o.color === "w" ? "Grasz białymi" : "Grasz czarnymi"} · ${o.games} partii · ${wdlTxt(o)}</div><h2>${esc(o.name)}</h2>${wdlBar(o.w,o.d,o.l)}<div style="margin-top:10px">${o.intro.map(x => "<p style='margin:0 0 8px'>" + rich(x) + "</p>").join("")}</div></div>
-  <div class="card"><div class="kicker">Najczęstsze warianty w Twoich partiach</div><div class="list">${o.variants.map((v,i) => `<button class="item" data-go="opv-${o.id}--${v.id}"><span class="badge">${i+1}</span><span class="t"><b>${esc(v.name)}</b><span>${v.stats.n} partii · ${wdlTxt(v.stats)}</span><div style="margin-top:6px">${wdlBar(v.stats.w,v.stats.d,v.stats.l)}</div></span><span class="chev">›</span></button>`).join("")}</div></div>
+  <div class="card"><div class="kicker">Mapa wariantów z Twoich partii</div><h2 style="font-size:18px">Dokąd prowadzi to otwarcie</h2>${variantMap(o)}</div>
   <div id="startHost"></div>`;
   bindGo(app);
   const c = document.createElement("div"); c.className = "card"; c.innerHTML = '<div class="sec-title">Pozycja po pierwszych ruchach</div>'; $("#startHost").appendChild(c);
@@ -420,11 +474,15 @@ function viewOpVariant(oid, vid){
   <p class="small muted" style="margin:0 0 6px">W Twoich partiach: ${v.stats.n} razy, wynik ${wdlTxt(v.stats)}${v.stats.note ? " · " + esc(v.stats.note) : ""}</p>${wdlBar(v.stats.w,v.stats.d,v.stats.l)}
   <div class="tagline" style="margin-top:8px"><span class="pill" style="background:#dcefe2;color:#174d2d">✓ Sprawdzone: ${esc(v.verified || "")}</span></div></div>
   <div class="card" id="lpHost"><div class="sec-title">Ruch po ruchu (naciśnij ▶)</div></div>
-  <div class="card"><div class="kicker">Czego się spodziewać</div><h2>Po tym wariancie</h2>${v.expect.map(x => "<p style='margin:0 0 8px'>" + rich(x) + "</p>").join("")}</div>
+  <div class="card"><div class="kicker">Czego się spodziewać</div><h2>Po tym wariancie</h2>${v.ev !== undefined ? evalGauge(v.ev, o.color) : ""}</div>
+  <div class="card" id="plansHost"><div class="kicker">Plany na szachownicy</div><h2 style="font-size:18px">Pozycja po 6. ruchu</h2></div>
+  <div class="card"><div class="kicker">Twoje wyniki w tym wariancie</div>${resultsViz(v.stats, o)}</div>
+  <details class="box"><summary>Opis słowny</summary><div style="padding-bottom:10px">${v.expect.map(x => "<p style='margin:0 0 8px'>" + rich(x) + "</p>").join("")}</div></details>
   <div class="card"><div class="kicker">Ćwiczenie</div><h2>Zagraj wariant z pamięci</h2><p class="muted small" style="margin-top:0">Grasz swoje ruchy, a aplikacja odpowiada za przeciwnika.</p><div id="drill"></div></div>
   ${nx ? `<button class="btn" data-go="opv-${o.id}--${nx.id}">Następny wariant: ${esc(nx.name)} ›</button>` : `<button class="btn sec" data-go="op-${o.id}">Wróć do listy wariantów</button>`}`;
   bindGo(app);
   linePlayer($("#lpHost"), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", v.moves, { orient:o.color, notes:v.notes });
+  plansViz($("#plansHost"), v, o.color);
   repDrill($("#drill"), { moves:v.moves, color:o.color, name:v.name });
 }
 function repCard(){
