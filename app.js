@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120175510";
+const APP_VERSION = "20261120175948";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -412,9 +412,28 @@ function nextExercises(n){
   const score = e => ({ new:0, fail:1, fix:2, ok:3 })[exStatus(e.id)] - (boost.has(e.id) ? 1.5 : 0);
   return all.slice().sort((a,b) => score(a) - score(b) || (S.ex[a.id]?.ts||0) - (S.ex[b.id]?.ts||0)).slice(0,n);
 }
+function heroStats(){
+  // bazowa analiza + wszystkie nowe partie (zakładka Partie i ręczny import), bez podwójnego liczenia
+  const B = D.baseline; const known = new Set(D.knownIds); const seen = new Set(); const nw = [];
+  let local = []; try { local = (GAMES || gLoadLocal().map(expandGame)); } catch(e) {}
+  local.forEach(g => { if (!known.has(g.id) && !seen.has(g.id)) { seen.add(g.id); const my = (g.clocks || []).filter((x,i) => (i % 2 === 0) === (g.color === "w")); nw.push({ id:g.id, date:g.time || g.date, res:g.res, elo:g.myElo, used: my.length > 10 ? (g.tc || 600) - my[my.length-1] : null, an:anGet(g.id), color:g.color }); } });
+  (S.imported.games || []).forEach(g => { if (!known.has(g.id) && !seen.has(g.id)) { seen.add(g.id); nw.push({ id:g.id, date:g.date, res:g.res, elo:g.rating, used:null, an:null, color:g.c }); } });
+  const H = { games:B.games, w:B.w, d:B.d, l:B.l, rating:B.ratingNow, max:B.ratingMax, bpg:B.blundersPerGame, used:B.medianTimeUsed || 284, nNew:nw.length, last:null };
+  if (!nw.length) return H;
+  nw.sort((a,b) => a.date < b.date ? -1 : 1);
+  nw.forEach(g => { H.games++; if (g.res === "W") H.w++; else if (g.res === "D") H.d++; else H.l++; if (g.elo) H.max = Math.max(H.max, g.elo); });
+  const lastE = nw.filter(g => g.elo).pop(); if (lastE) H.rating = lastE.elo; H.last = nw[nw.length-1].date.slice(0,10);
+  // poważne błędy: partie przeanalizowane w zakładce Partie + ręczne analizy (snapshoty), ważone liczbą partii
+  let errN = B.analysed, errSum = B.blundersPerGame * B.analysed; const anIds = new Set();
+  nw.forEach(g => { if (g.an) { anIds.add(g.id); errN++; errSum += g.an.plies.filter(p => p.c === g.color && p.k === "blunder").length; } });
+  (S.imported.snaps || []).forEach(sn => { if (sn.bpg != null && sn.n) { errN += sn.n; errSum += sn.bpg * sn.n; } });
+  H.bpg = Math.round(errSum / errN * 100) / 100;
+  const us = nw.map(g => g.used).filter(x => x != null); if (us.length) H.used = Math.round((H.used * B.games + us.reduce((a,b) => a+b, 0)) / (B.games + us.length));
+  return H;
+}
 function viewStart(){
   setTab("start"); $("#ttl").textContent = "Trener szachowy";
-  const B = D.baseline; const all = activeExercises();
+  const B = D.baseline; const HS = heroStats(); const all = activeExercises();
   const done = all.filter(e => ["ok","fix"].includes(exStatus(e.id))).length;
   const nl = D.notation.filter(l => S.nota[l.id]).length;
   const nextL = D.notation.find(l => !S.nota[l.id]);
@@ -422,13 +441,13 @@ function viewStart(){
   app.innerHTML = `
   <div class="card hero">
     <div class="kicker" style="color:#f0c27a">Cześć, Kamil</div>
-    <h2>Twój plan treningowy na podstawie ${B.games} partii z chess.com</h2>
-    <p class="muted" style="margin:0">Analiza z ${fmtDate(D.analysisDate)}. Partie rapid 10 min, ${B.analysed} ostatnich sprawdzonych Stockfishem.</p>
+    <h2>Twój plan treningowy na podstawie ${HS.games} partii z chess.com</h2>
+    <p class="muted" style="margin:0">Analiza z ${fmtDate(D.analysisDate)}${HS.nNew ? " + " + plural(HS.nNew, "nowa partia", "nowe partie", "nowych partii") + " (ostatnia " + fmtDate(HS.last) + ")" : ""}. Partie rapid 10 min.</p>
     <div class="kpis">
-      <div class="kpi"><b>${B.ratingNow}</b><span>rating rapid (max ${B.ratingMax})</span></div>
-      <div class="kpi"><b>${B.winPct}%</b><span>wygranych (${B.w}–${B.d}–${B.l})</span></div>
-      <div class="kpi"><b>${String(B.blundersPerGame).replace(".",",")}</b><span>poważnych błędów na partię</span></div>
-      <div class="kpi"><b>4:44</b><span>średnio zużyty czas z 10:00</span></div>
+      <div class="kpi"><b>${HS.rating}</b><span>rating rapid (max ${HS.max})</span></div>
+      <div class="kpi"><b>${Math.round(HS.w / HS.games * 100)}%</b><span>wygranych (${HS.w}–${HS.d}–${HS.l})</span></div>
+      <div class="kpi"><b>${HS.bpg.toFixed(2).replace(".",",")}</b><span>poważnych błędów na partię</span></div>
+      <div class="kpi"><b>${Math.floor(HS.used/60)}:${String(Math.round(HS.used % 60)).padStart(2,"0")}</b><span>średnio zużyty czas z 10:00</span></div>
     </div>
   </div>
   <div id="newGames"></div>
@@ -1200,6 +1219,7 @@ const CLS = {
 };
 const CLS_ORDER = ["brilliant","great","best","excellent","good","book","inaccuracy","mistake","miss","blunder"];
 let GAMES = null, GSTATUS = { loading:false, err:null, queue:[], running:null, prog:0, listeners:new Set() };
+function refreshStart(){ if (["", "#start"].includes(location.hash)) { const y = window.scrollY; viewStart(); window.scrollTo(0, y); } }
 function gNotify(){ GSTATUS.listeners.forEach(f => { try { f(); } catch(e){} }); }
 function gLoadLocal(){ try { const r = localStorage.getItem(GKEY); return r ? JSON.parse(r) : []; } catch(e) { return []; } }
 function gSaveLocal(list){ try { localStorage.setItem(GKEY, JSON.stringify(list)); } catch(e) {} }
@@ -1223,7 +1243,7 @@ async function gFetchAll(){
     for (const u of months) { if (lastMonth && u.slice(-7) < lastMonth && have.length > 50) continue; const j = await (await fetch(u)).json(); pg = pg.concat((j.games || []).filter(g => g.rules === "chess" && g.pgn).map(g => g.pgn)); }
     addGames(pg.map(parsePgn).filter(g => g && !haveIds.has(g.id)));
   } catch(e) { GSTATUS.err = "Nie udało się połączyć z chess.com z tej strony."; }
-  GSTATUS.loading = false; if (!GAMES) GAMES = gLoadLocal().map(expandGame); gQueueAuto(); gNotify();
+  GSTATUS.loading = false; if (!GAMES) GAMES = gLoadLocal().map(expandGame); gQueueAuto(); gNotify(); refreshStart();
 }
 function gQueueAuto(){ (GAMES || []).filter(g => g.date >= ANALYSIS_FROM && !anGet(g.id)).forEach(g => gEnqueue(g.id)); }
 function gEnqueue(id){ if (GSTATUS.queue.includes(id) || GSTATUS.running === id || anGet(id)) return; GSTATUS.queue.push(id); gNotify(); gRun(); }
@@ -1232,7 +1252,7 @@ async function gRun(){
   if (!S.settings.engine || !(await AnaEngine.ready())) { GSTATUS.err = "Silnik jest niedostępny, analiza wstrzymana."; gNotify(); return; }
   const id = GSTATUS.queue.shift(); GSTATUS.running = id; GSTATUS.prog = 0; gNotify();
   const g = (GAMES || []).find(x => x.id === id);
-  try { if (g) { const a = await analyseFullGame(g, p => { GSTATUS.prog = p; gNotify(); }); if (a) anSet(id, a); } } catch(e) { console.warn(e); }
+  try { if (g) { const a = await analyseFullGame(g, p => { GSTATUS.prog = p; gNotify(); }); if (a) { anSet(id, a); refreshStart(); } } } catch(e) { console.warn(e); }
   GSTATUS.running = null; gNotify(); gRun();
 }
 /* ---------- analiza ---------- */
