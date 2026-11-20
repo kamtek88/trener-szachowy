@@ -236,11 +236,14 @@ textarea{width:100%;min-height:130px;border-radius:12px;border:1px solid var(--l
 .gchips{max-height:190px;overflow:auto;margin-top:8px}
 .gchips .chip .clsb{margin-left:4px}
 
-.gpin.on{position:sticky;top:calc(var(--toph,64px) + 4px);z-index:15;padding:8px 10px;box-shadow:0 6px 18px rgba(0,0,0,.12)}
-.gpin.on .bouter{max-width:min(550px,calc(36vh + 30px))}
-.gpin.on .lp .ctrl{margin:6px 0}
-.gpin.on .lp .ctrl button{min-height:38px;font-size:17px}
+.gpin.on{position:sticky;top:calc(var(--toph,64px) + 4px);z-index:15;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.gpin.on .bouter{max-width:min(550px,calc(27vh + 24px))}
+.gpin.on{padding:6px 8px}
+.gpin.on .lp .ctrl{margin:4px 0}
+.gpin.on .lp .ctrl button{min-height:32px;font-size:15px}
+.gpin.on .gchips .chip{min-height:28px;padding:3px 6px;font-size:13px}
 .gpin .lp .ctrl{grid-template-columns:repeat(4,1fr) 48px}
+.gpin.on .lp .ctrl{grid-template-columns:repeat(4,1fr) 40px}
 .gpin .pinb{opacity:.45}
 .gpin.on .pinb{opacity:1;background:#eef3ee}
 .gpin .gchips{display:flex;flex-wrap:nowrap;overflow-x:auto;max-height:none;gap:4px;margin-top:0;padding-bottom:2px;scrollbar-width:none}
@@ -264,7 +267,7 @@ textarea{width:100%;min-height:130px;border-radius:12px;border:1px solid var(--l
   <button data-t="postepy"><span class="ic">♕</span>Postępy</button>
 </nav>
 <script src="https://cdn.jsdelivr.net/npm/chess.js@0.10.3/chess.js"></script>
-<script src="data.js?v=20261120180543"></script>
-<script src="app.js?v=20261120180543"></script>
+<script src="data.js?v=20261120180940"></script>
+<script src="app.js?v=20261120180940"></script>
 </body>
 </html>
