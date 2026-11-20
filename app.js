@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120180940";
+const APP_VERSION = "20261120181523";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -1458,15 +1458,60 @@ function viewGame(id){
   const chips = document.createElement("div"); chips.className = "chips gchips"; host.appendChild(chips);
   const fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]; const gg = new Chess(); P.forEach(p => { gg.move(p.s, { sloppy:true }); fens.push(gg.fen()); });
   chips.innerHTML = P.map((p,i) => `<button class="chip" data-i="${i}">${i % 2 === 0 ? `<span class="n">${i/2+1}.</span>` : ""}${fmtSan(p.s)}${["brilliant","great","inaccuracy","mistake","miss","blunder"].includes(p.k) ? clsBadge(p.k) : ""}</button>`).join("");
-  let idx = -1;
+  let idx = -1, sb = null, sbTok = 0;
+  const cpTxtW = cp => (Math.abs(cp) >= 9000 ? (cp > 0 ? "+M" : "−M") + Math.max(1, Math.round((10000 - Math.abs(cp)) / 10)) : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ","));
+  function userMove(m){
+    if (!sb && P[idx+1] && m.san === P[idx+1].s) { show(idx+1); return; }
+    if (!sb) sb = { base: idx, moves: [] };
+    sb.moves.push(m); board.arrows = []; board.marks = []; board.last = { f:m.from, t:m.to }; board.render();
+    chips.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+    renderSb();
+  }
+  async function renderSb(){
+    const t = ++sbTok; const C = $("#gComment"); const fen = board.game.fen(); const gg = new Chess(fen);
+    const startNo = Math.floor((sb.base + 1) / 2) + 1; const blackFirst = (sb.base + 1) % 2 === 1;
+    const list = sb.moves.map((x, k) => { const ply = sb.base + 1 + k; return (ply % 2 === 0 ? (ply/2 + 1) + ". " : (k === 0 ? Math.floor(ply/2) + 1 + "… " : "")) + '<span class="mv">' + fmtSan(x.san) + "</span>"; }).join(" ");
+    const real = P[sb.base + 1];
+    let html = `<div class="kicker">🔍 Twój wariant (Co jeśli…?)</div><div style="font-size:16px;line-height:1.7">${list}</div><div class="small muted">${esc(words(sb.moves[sb.moves.length-1]))}</div>`;
+    if (real && sb.moves.length === 1) html += `<div class="small" style="margin-top:6px">W partii zagrano <span class="mv">${fmtSan(real.s)}</span> (ocena po nim ${cpTxtW(real.w)}).</div>`;
+    const btns = (extra) => `<div class="row" style="margin-top:10px">${extra || ""}<button class="btn sec sbUndo" style="min-height:42px;font-size:14px">↶ Cofnij</button><button class="btn sec sbBack" style="min-height:42px;font-size:14px">Wróć do partii</button></div>`;
+    const done = (h, extra) => { C.innerHTML = h + btns(extra) + '<p class="small muted" style="margin:8px 0 0">Graj dalej na planszy za obie strony. Każda pozycja jest liczona na nowo.</p>'; bindSb(); };
+    if (gg.in_checkmate()) return done(html + "<p><b>Mat!</b></p>");
+    if (gg.in_draw() || gg.in_stalemate()) return done(html + "<p><b>Remis (pat, powtórzenie albo brak materiału).</b></p>");
+    if (!S.settings.engine) return done(html + '<p class="small muted">Silnik jest wyłączony w ustawieniach.</p>');
+    done(html + '<p class="small"><span class="spin"></span> Stockfish liczy tę pozycję…</p>');
+    const ok = await Engine.ready(); if (t !== sbTok) return;
+    if (!ok) return done(html + '<p class="small muted">Silnik jest niedostępny.</p>');
+    const r = await Engine.eval(fen, 2500, null, 3); if (t !== sbTok) return;
+    if (!r) return done(html + '<p class="small muted">Nie udało się policzyć tej pozycji.</p>');
+    const sign = gg.turn() === "w" ? 1 : -1; const cpW = sign * r.cp; const meCp = g.color === "w" ? cpW : -cpW;
+    html += `<div style="margin-top:8px;font-size:17px"><b>Ocena: ${cpTxtW(cpW)}</b> <span class="small muted">(z punktu widzenia białych)</span></div><div class="small">${esc(evalWords(meCp))}</div>`;
+    const lines = (r.lines && r.lines.length ? r.lines : [{ cp:r.cp, pv:r.pv }]).slice(0, 3);
+    const cols = ["rgba(40,110,200,.9)", "rgba(40,110,200,.5)", "rgba(40,110,200,.32)"]; const arrows = [];
+    html += `<div class="small" style="margin-top:8px"><b>Najlepsze ruchy ${gg.turn() === "w" ? "białych" : "czarnych"} (${esc(Engine.name || "silnik")}, 2,5 s):</b></div><ol class="sbl">` + lines.map((l, k) => {
+      const san = uciToSanLine(fen, l.pv, 6); if (!san.length) return "";
+      const mm = new Chess(fen).move(san[0], { sloppy:true }); if (mm) arrows.push({ f:mm.from, t:mm.to, c:cols[k] });
+      return `<li><b>${cpTxtW(sign * l.cp)}</b> <span class="mv">${fmtSan(san[0])}</span> <span class="muted">${san.slice(1).map(x => fmtSan(x)).join(" ")}</span></li>`; }).join("") + "</ol>";
+    board.arrows = arrows; board.render();
+    const best = lines[0] && lines[0].pv && lines[0].pv[0];
+    done(html, best ? '<button class="btn sbPlay" style="min-height:42px;font-size:14px">Zagraj najlepszy</button>' : "");
+    const pb = C.querySelector(".sbPlay"); if (pb) pb.addEventListener("click", () => { const mm = board.game.move({ from:best.slice(0,2), to:best.slice(2,4), promotion:best[4] || "q" }); if (mm) { board.interactive = true; userMove(mm); } });
+  }
+  function bindSb(){
+    const C = $("#gComment");
+    C.querySelectorAll(".sbBack").forEach(b => b.addEventListener("click", () => show(sb ? sb.base : idx)));
+    C.querySelectorAll(".sbUndo").forEach(b => b.addEventListener("click", sbUndo));
+  }
+  function sbUndo(){ if (!sb) return; board.game.undo(); sb.moves.pop(); if (!sb.moves.length) { show(sb.base); return; } const lm = sb.moves[sb.moves.length-1]; board.last = { f:lm.from, t:lm.to }; board.arrows = []; board.render(); renderSb(); }
   function show(i){
+    sb = null; sbTok++;
     idx = Math.max(-1, Math.min(P.length - 1, i)); const p = P[idx];
     const arrows = [];
     if (p && ["inaccuracy","mistake","miss","blunder"].includes(p.k)) {
       const arr = (f, san, c) => { if (!san) return; const m = new Chess(f).move(san, { sloppy:true }); if (m) arrows.push({ f:m.from, t:m.to, c }); };
       if (p.c === g.color || ["mistake","miss","blunder"].includes(p.k)) { arr(fens[idx], p.bp && p.bp[0], "rgba(47,125,79,.85)"); if (p.c === g.color) arr(fens[idx+1], p.rp && p.rp[0], "rgba(200,60,40,.85)"); }
     }
-    board.set(fens[idx+1], { arrows, last: p ? { f:p.f, t:p.t } : null, marks: p && ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? [{ sq:p.t, c:hexA(CLS[p.k].c, .95) }] : [] });
+    board.set(fens[idx+1], { interactive:true, onMove:userMove, arrows, last: p ? { f:p.f, t:p.t } : null, marks: p && ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? [{ sq:p.t, c:hexA(CLS[p.k].c, .95) }] : [] });
     chips.querySelectorAll(".chip").forEach((c,j) => c.classList.toggle("on", j === idx));
     const on = chips.querySelector(".chip.on"); if (on) chips.scrollLeft = on.offsetLeft - chips.clientWidth / 2 + on.offsetWidth / 2; else chips.scrollLeft = 0;
     const cur = document.getElementById("egCur"); if (cur) cur.setAttribute("x", idx < 0 ? 0 : ((idx + 0.5) / P.length * 600 - 1).toFixed(1));
@@ -1476,7 +1521,7 @@ function viewGame(id){
   }
   function renderComment(p, i){
     const C = $("#gComment");
-    if (!p) { C.innerHTML = '<div class="kicker">Komentarz</div><p style="margin:0" class="muted">Pozycja początkowa. Naciśnij ▶ albo dotknij ruchu w zapisie.</p>'; return; }
+    if (!p) { C.innerHTML = '<div class="kicker">Komentarz</div><p style="margin:0" class="muted">Pozycja początkowa. Naciśnij ▶, dotknij ruchu w zapisie albo zagraj dowolny ruch na planszy.</p>'; return; }
     const mine = p.c === g.color; const cl = CLS[p.k];
     const pm = new Chess(fens[i]).move(p.s, { sloppy:true });
     let h = `<div class="cm-head">${clsBadge(p.k, true)}<div><b>${Math.floor(i/2)+1}${i % 2 ? "…" : "."} ${fmtSan(p.s)}</b> to ${cl.n.toLowerCase()} <span class="muted small">(${mine ? "Twój ruch" : "ruch przeciwnika"})</span><div class="small muted">${esc(words(pm))}</div></div></div>`;
@@ -1487,7 +1532,10 @@ function viewGame(id){
     else if (!mine && ["mistake","miss","blunder"].includes(p.k) && p.bp && p.bp.length) h += "<p>" + rich("Przeciwnik się pomylił. Lepiej było [[" + p.bp[0] + "]]. Sprawdź w następnym ruchu, czy to wykorzystałeś.") + "</p>";
     else if (["best","great","brilliant"].includes(p.k)) h += `<p style="margin:0">${p.k === "brilliant" ? "Genialny ruch: najlepszy, jedyny dobry i z ofiarą materiału." : p.k === "great" ? "Wspaniały ruch: jedyny, który utrzymywał przewagę lub równowagę." : "Ruch zgodny z pierwszym wyborem silnika."}</p>`;
     if (["inaccuracy","mistake","miss","blunder"].includes(p.k) && (mine || ["mistake","miss","blunder"].includes(p.k))) h += `<p class="small muted" style="margin:8px 0 0"><span style="color:#2f7d4f;font-weight:800">━➤</span> lepszy ruch${mine ? ` &nbsp; <span style="color:#c83c28;font-weight:800">━➤</span> odpowiedź przeciwnika` : ""} (strzałki na planszy)</p>`;
+    if (["inaccuracy","mistake","miss","blunder"].includes(p.k) && mine) h += `<button class="btn sec cmTry" style="margin-top:10px;min-height:42px;font-size:14px">🔍 Sprawdź inny ruch zamiast ${fmtSan(p.s)}</button>`;
+    h += `<p class="small muted" style="margin:8px 0 0">Możesz zagrać na planszy dowolny ruch. Stockfish od razu go oceni.</p>`;
     C.innerHTML = `<div class="kicker">Komentarz</div>` + h;
+    const tb = C.querySelector(".cmTry"); if (tb) tb.addEventListener("click", () => { show(i - 1); toast("Pozycja przed Twoim ruchem. Zagraj na planszy inny ruch."); });
     if (p.x && mine) {
       const L = $("#cmLines");
       [["Najlepszy wariant", fens[i], p.bp, "rgba(47,125,79,.9)"], ["Odpowiedź przeciwnika na Twój ruch", fens[i+1], p.rp, "rgba(180,68,47,.85)"]].forEach(([lab, f, line, col]) => {
@@ -1496,7 +1544,7 @@ function viewGame(id){
       });
     }
   }
-  ctrl.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; const act = b.dataset.a; if (act === "pin") { S.settings.pin = S.settings.pin === false; save(); host.classList.toggle("on", S.settings.pin !== false); toast(S.settings.pin !== false ? "Plansza przypięta: zostaje widoczna podczas czytania" : "Plansza odpięta"); return; } show(act === "first" ? -1 : act === "prev" ? idx - 1 : act === "next" ? idx + 1 : P.length - 1); });
+  ctrl.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; const act = b.dataset.a; if (sb && act === "prev") { sbUndo(); return; } if (sb && act !== "pin") { const base = sb.base; if (act === "next") { show(base + 1); return; } } if (act === "pin") { S.settings.pin = S.settings.pin === false; save(); host.classList.toggle("on", S.settings.pin !== false); toast(S.settings.pin !== false ? "Plansza przypięta: zostaje widoczna podczas czytania" : "Plansza odpięta"); return; } show(act === "first" ? -1 : act === "prev" ? idx - 1 : act === "next" ? idx + 1 : P.length - 1); });
   chips.addEventListener("click", e => { const c = e.target.closest(".chip"); if (c) show(+c.dataset.i); });
   app.querySelectorAll("[data-ply]").forEach(el => el.addEventListener("click", () => { show(+el.dataset.ply); $("#gBoard").scrollIntoView({ behavior:"smooth", block:"start" }); }));
   const eg = app.querySelector(".egraph"); if (eg) eg.addEventListener("click", e => { if (e.target.dataset && e.target.dataset.ply) return; const r = eg.getBoundingClientRect(); show(Math.floor((e.clientX - r.left) / r.width * P.length)); });
