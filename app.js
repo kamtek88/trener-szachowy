@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120083646";
+const APP_VERSION = "20261120175510";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -73,14 +73,14 @@ function activeExercises(){ return allExercises().filter(e => !isMis(e.id)); }
 function exStatus(id){ const r = S.ex[id]; if (!r) return "new"; if (r.first === true) return "ok"; if (r.solved) return "fix"; return "fail"; }
 
 /* ---------------- engine (Stockfish 10, asm.js, w Web Workerze) ---------------- */
-const Engine = {
-  w:null, state:"idle", q:[], cur:null, waiters:[], tier:null, name:"",
+function makeEngine(isMain){ return {
+  w:null, state:"idle", q:[], cur:null, waiters:[], tier:null, name:"", mpvSet:1,
   // Najpierw Stockfish 16 (WASM). Gdy strona go nie wpuści (np. w ramce claude.ai), automatycznie Stockfish 10 (asm.js).
   start(){
     if (!S.settings.engine) return;
     if (this.w || this.state === "failed") return;
     this.state = "loading";
-    const tier = this.tier || 16; this._try(tier);
+    const tier = this.tier || (isMain ? 16 : (Engine.tier || 16)); this._try(tier);
   },
   _try(tier){
     const SF16 = "https://cdn.jsdelivr.net/npm/stockfish@16.0.0/src/";
@@ -88,7 +88,7 @@ const Engine = {
     try {
       if (tier === 16) url = URL.createObjectURL(new Blob(['importScripts("' + SF16 + 'stockfish-nnue-16-single.js");'], { type:"text/javascript" })) + "#" + encodeURIComponent(SF16 + "stockfish-nnue-16-single.wasm");
       else url = URL.createObjectURL(new Blob(['importScripts("https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js");'], { type:"text/javascript" }));
-      const w = this.w = new Worker(url); this.pending = tier;
+      const w = this.w = new Worker(url); this.pending = tier; this.mpvSet = 1;
       w.onmessage = e => { if (w === this.w) this._msg(String(e.data)); };
       w.onerror = () => { if (w === this.w) this._loadFail(tier); };
       w.postMessage("uci");
@@ -101,23 +101,25 @@ const Engine = {
     if (tier === 16) { this._try(10); return; }
     this._fail();
   },
-  _fail(){ this.state = "failed"; try { this.w && this.w.terminate(); } catch(e){} this.w = null; this.waiters.forEach(f => f(false)); this.waiters = []; this.q.forEach(j => j.resolve(null)); this.q = []; updEngineBadge(); },
+  _fail(){ this.state = "failed"; try { this.w && this.w.terminate(); } catch(e){} this.w = null; this.waiters.forEach(f => f(false)); this.waiters = []; this.q.forEach(j => j.resolve(null)); this.q = []; if (isMain) updEngineBadge(); },
   ready(){ return new Promise(res => { if (this.state === "ready") return res(true); if (this.state === "failed" || !S.settings.engine) return res(false); this.waiters.push(res); this.start(); }); },
   _msg(s){
-    if (s === "uciok") { this.state = "ready"; this.tier = this.pending; this.name = this.tier === 16 ? "Stockfish 16" : "Stockfish 10"; this.w.postMessage("setoption name Hash value 16"); this.waiters.forEach(f => f(true)); this.waiters = []; updEngineBadge(); this._next(); return; }
+    if (s === "uciok") { this.state = "ready"; this.tier = this.pending; this.name = this.tier === 16 ? "Stockfish 16" : "Stockfish 10"; this.w.postMessage("setoption name Hash value 16"); this.waiters.forEach(f => f(true)); this.waiters = []; if (isMain) updEngineBadge(); this._next(); return; }
     const c = this.cur; if (!c) return;
     if (s.startsWith("info") && s.includes(" score ") && !s.includes("bound")) {
-      const m = s.match(/score (cp|mate) (-?\d+)/);
-      if (m) { const v = +m[2]; c.cp = m[1] === "cp" ? v : (v > 0 ? 10000 - v*10 : -10000 - v*10); }
-      const pv = s.split(" pv ")[1]; if (pv) c.pv = pv.trim().split(" ");
+      const m = s.match(/score (cp|mate) (-?\d+)/); const k = +((s.match(/ multipv (\d+)/) || [0,1])[1]);
+      const pv = s.split(" pv ")[1]; const d = +((s.match(/ depth (\d+)/) || [0,0])[1]);
+      if (m) { const v = +m[2]; const cp = m[1] === "cp" ? v : (v > 0 ? 10000 - v*10 : -10000 - v*10);
+        c.lines[k] = { cp, pv: pv ? pv.trim().split(" ") : [], depth: d };
+        if (k === 1) { c.cp = cp; if (pv) c.pv = pv.trim().split(" "); c.depth = d; } }
     }
-    if (s.startsWith("bestmove")) { clearTimeout(c.to); this.cur = null; c.resolve({ cp: c.cp, pv: c.pv || [s.split(" ")[1]], best: s.split(" ")[1] }); this._next(); }
+    if (s.startsWith("bestmove")) { clearTimeout(c.to); this.cur = null; c.resolve({ cp: c.cp, pv: c.pv || [s.split(" ")[1]], best: s.split(" ")[1], depth: c.depth, lines: c.lines.filter(Boolean) }); this._next(); }
   },
-  eval(fen, ms, key){
+  eval(fen, ms, key, mpv){
     return new Promise(resolve => {
-      if (HAS_CHESS) { const g = new Chess(fen); if (g.in_checkmate()) return resolve({ cp:-10000, pv:[], best:null }); if (g.in_draw() || g.in_stalemate()) return resolve({ cp:0, pv:[], best:null }); }
+      if (HAS_CHESS) { const g = new Chess(fen); if (g.in_checkmate()) return resolve({ cp:-10000, pv:[], best:null, lines:[] }); if (g.in_draw() || g.in_stalemate()) return resolve({ cp:0, pv:[], best:null, lines:[] }); }
       if (key) { this.q = this.q.filter(j => { if (j.key === key) { j.resolve(null); return false; } return true; }); }
-      this.q.push({ fen, ms: ms || 1000, resolve, cp:null, key });
+      this.q.push({ fen, ms: ms || 1000, resolve, cp:null, key, mpv: mpv || 1, lines:[] });
       this.start(); this._next();
     });
   },
@@ -125,10 +127,13 @@ const Engine = {
     if (this.cur || !this.q.length || this.state !== "ready") return;
     const c = this.cur = this.q.shift();
     c.to = setTimeout(() => { if (this.cur === c) { this.cur = null; try { this.w.terminate(); } catch(e){} this.w = null; this.state = "idle"; c.resolve(null); this.start(); } }, c.ms + 8000);
+    if (c.mpv !== this.mpvSet) { this.w.postMessage("setoption name MultiPV value " + c.mpv); this.mpvSet = c.mpv; }
     this.w.postMessage("position fen " + c.fen); this.w.postMessage("go movetime " + c.ms);
   },
   stop(){ this.q.forEach(j => j.resolve(null)); this.q = []; }
-};
+}; }
+const Engine = makeEngine(true);
+const AnaEngine = makeEngine(false);   // osobny wątek do analizy całych partii, żeby belka oceny działała płynnie
 function updEngineBadge(){ const b = $("#engState"); if (!b) return; b.innerHTML = engLabel(); }
 function engLabel(){ if (!S.settings.engine) return "wyłączony"; return ({ idle:"nieuruchomiony", loading:'<span class="spin"></span> ładuję…', ready: (Engine.name || "gotowy") + " ✓", failed:"niedostępny" })[Engine.state]; }
 function uciToSanLine(fen, uciList, n){ const g = new Chess(fen); const out = []; for (const u of (uciList||[]).slice(0, n)) { const m = g.move({ from:u.slice(0,2), to:u.slice(2,4), promotion:u[4] || "q" }); if (!m) break; out.push(m.san); } return out; }
@@ -332,10 +337,12 @@ $("#tabs").addEventListener("click", e => { const b = e.target.closest("button")
 $("#btnNot").addEventListener("click", () => go("notacja"));
 $("#btnSet").addEventListener("click", openSettings);
 function route(){
-  Engine.stop();
+  Engine.stop(); document.querySelectorAll(".modal").forEach(x => x.remove());
   const h = (location.hash || "#start").slice(1);
   window.scrollTo(0,0);
   if (!HAS_CHESS) { app.innerHTML = '<div class="card"><h2>Brak biblioteki szachowej</h2><p>Nie udało się wczytać chess.js z internetu. Sprawdź połączenie i odśwież stronę.</p></div>'; return; }
+  if (h.startsWith("partia-")) return viewGame(h.slice(7));
+  if (h === "partie") return viewGames();
   if (h.startsWith("ex-")) return viewExercise(h.slice(3));
   if (h.startsWith("lesson-")) return viewLesson(h.slice(7));
   if (h.startsWith("rep-")) return viewRep(h.slice(4));
@@ -993,6 +1000,7 @@ function openRefresh(){
     const known = new Set(D.knownIds.concat(S.imported.ids || []));
     const fresh = games.filter(g => g.id && !known.has(g.id) && g.mine);
     if (!games.length) { msg.innerHTML = '<div class="verdict bad">Nie rozpoznałem partii w tym tekście. Skopiuj całą stronę z chess.com.</div>'; return; }
+    try { if (!GAMES) GAMES = gLoadLocal().map(expandGame); addGames(games); gQueueAuto(); } catch(e) { console.warn(e); }
     if (!fresh.length) { msg.innerHTML = '<div class="verdict mid">Znaleziono ' + games.length + " partii, ale wszystkie są już w analizie. Zagraj nowe i wróć!</div>"; return; }
     $("#refGo", m).disabled = true;
     msg.innerHTML = '<div class="verdict mid">Nowe partie: <b>' + fresh.length + "</b>. Liczę statystyki…</div>";
@@ -1032,7 +1040,8 @@ function parsePgn(p){
   const id = (h.Link || h.Site || "").split("/").pop();
   const myClocks = clocks.filter((x,i) => (i % 2 === 0) === white);
   const tc = +(h.TimeControl || "600").split("+")[0] || 600;
-  return { id, mine: white || black, color, res, toks, opp: white ? h.Black : h.White, oe: +(white ? h.BlackElo : h.WhiteElo) || 0, myElo: +(white ? h.WhiteElo : h.BlackElo) || 0, date: (h.UTCDate || h.Date || "").replace(/\./g,"-"), url: h.Link || "", used: myClocks.length > 10 ? tc - myClocks[myClocks.length-1] : null, cat: category(toks, color) };
+  const eco = ((h.ECOUrl || "").split("/openings/")[1] || "").replace(/-/g, " ");
+  return { id, clocks, eco, term: h.Termination || "", tc, time: (h.EndDate || h.UTCDate || h.Date || "").replace(/\./g,"-") + " " + (h.EndTime || h.UTCTime || ""), mine: white || black, color, res, toks, opp: white ? h.Black : h.White, oe: +(white ? h.BlackElo : h.WhiteElo) || 0, myElo: +(white ? h.WhiteElo : h.BlackElo) || 0, date: (h.UTCDate || h.Date || "").replace(/\./g,"-"), url: h.Link || "", used: myClocks.length > 10 ? tc - myClocks[myClocks.length-1] : null, cat: category(toks, color) };
 }
 function category(t, c){
   if (c === "w") { if (t[0]==="d4" && t[1]==="d5" && t[2]==="c4") return t[3]==="dxc4" ? "qga" : "qgd"; if (t[0]==="d4" && t[2]==="Bf4") return "london"; if (t[0]==="d4" && t[1]==="Nf6") return "d4nf6"; return "wOther"; }
@@ -1181,6 +1190,293 @@ window.__selfTest = function(){
   return errs.length ? errs : "OK";
 };
 
+/* ================= ZAKŁADKA „PARTIE”: pobieranie, analiza silnikiem, przegląd partii ================= */
+const ANALYSIS_FROM = "2026-11-20";              // od tego dnia każda nowa partia jest analizowana automatycznie
+const GKEY = "kt-games-v1", AKEY = "kt-an-v1-";
+const CLS = {
+  brilliant:{ n:"Genialny", i:"!!", c:"#1fb5a3" }, great:{ n:"Wspaniały", i:"!", c:"#6a98c4" }, best:{ n:"Najlepszy", i:"★", c:"#7fb33f" },
+  excellent:{ n:"Bardzo dobry", i:"👍", c:"#8fbb4a" }, good:{ n:"Dobry", i:"✓", c:"#97b38a" }, book:{ n:"Książkowy", i:"📖", c:"#b08c66" },
+  inaccuracy:{ n:"Niedokładność", i:"?!", c:"#e5b52a" }, mistake:{ n:"Błąd", i:"?", c:"#ff9a4d" }, miss:{ n:"Przeoczenie", i:"✕", c:"#ff6f61" }, blunder:{ n:"Poważny błąd", i:"??", c:"#f03a2a" }
+};
+const CLS_ORDER = ["brilliant","great","best","excellent","good","book","inaccuracy","mistake","miss","blunder"];
+let GAMES = null, GSTATUS = { loading:false, err:null, queue:[], running:null, prog:0, listeners:new Set() };
+function gNotify(){ GSTATUS.listeners.forEach(f => { try { f(); } catch(e){} }); }
+function gLoadLocal(){ try { const r = localStorage.getItem(GKEY); return r ? JSON.parse(r) : []; } catch(e) { return []; } }
+function gSaveLocal(list){ try { localStorage.setItem(GKEY, JSON.stringify(list)); } catch(e) {} }
+function anGet(id){ try { const r = localStorage.getItem(AKEY + id); return r ? JSON.parse(r) : null; } catch(e) { return null; } }
+function anSet(id, a){ try { localStorage.setItem(AKEY + id, JSON.stringify(a)); return true; } catch(e) { return false; } }
+function compactGame(g){ return { id:g.id, c:g.color, res:g.res, opp:g.opp, oe:g.oe, me:g.myElo, date:g.date, time:g.time || g.date, url:g.url, eco:g.eco || "", term:g.term || "", tc:g.tc || 600, m:g.toks.join(" "), k:(g.clocks || []).map(x => Math.round(x)).join(",") }; }
+function expandGame(c){ return { id:c.id, color:c.c, res:c.res, opp:c.opp, oe:c.oe, myElo:c.me, date:c.date, time:c.time, url:c.url, eco:c.eco, term:c.term, tc:c.tc, toks:c.m ? c.m.split(" ") : [], clocks:c.k ? c.k.split(",").map(Number) : [] }; }
+function addGames(list){
+  const cur = gLoadLocal(); const ids = new Set(cur.map(x => x.id)); let added = 0;
+  list.forEach(g => { if (g && g.mine && g.id && !ids.has(g.id) && g.toks && g.toks.length) { cur.push(compactGame(g)); ids.add(g.id); added++; } });
+  cur.sort((a,b) => a.time < b.time ? 1 : -1); gSaveLocal(cur); GAMES = cur.map(expandGame); return added;
+}
+async function gFetchAll(){
+  if (GSTATUS.loading) return; GSTATUS.loading = true; GSTATUS.err = null; gNotify();
+  try {
+    const a = await (await fetch("https://api.chess.com/pub/player/" + D.user + "/games/archives")).json();
+    const months = (a.archives || []).filter(u => u.slice(-7) >= "2025/11");
+    const have = gLoadLocal(); const haveIds = new Set(have.map(x => x.id));
+    const lastMonth = have.length ? have.map(x => x.date.slice(0,7).replace("-","/")).sort().pop() : null;
+    let pg = [];
+    for (const u of months) { if (lastMonth && u.slice(-7) < lastMonth && have.length > 50) continue; const j = await (await fetch(u)).json(); pg = pg.concat((j.games || []).filter(g => g.rules === "chess" && g.pgn).map(g => g.pgn)); }
+    addGames(pg.map(parsePgn).filter(g => g && !haveIds.has(g.id)));
+  } catch(e) { GSTATUS.err = "Nie udało się połączyć z chess.com z tej strony."; }
+  GSTATUS.loading = false; if (!GAMES) GAMES = gLoadLocal().map(expandGame); gQueueAuto(); gNotify();
+}
+function gQueueAuto(){ (GAMES || []).filter(g => g.date >= ANALYSIS_FROM && !anGet(g.id)).forEach(g => gEnqueue(g.id)); }
+function gEnqueue(id){ if (GSTATUS.queue.includes(id) || GSTATUS.running === id || anGet(id)) return; GSTATUS.queue.push(id); gNotify(); gRun(); }
+async function gRun(){
+  if (GSTATUS.running || !GSTATUS.queue.length) return;
+  if (!S.settings.engine || !(await AnaEngine.ready())) { GSTATUS.err = "Silnik jest niedostępny, analiza wstrzymana."; gNotify(); return; }
+  const id = GSTATUS.queue.shift(); GSTATUS.running = id; GSTATUS.prog = 0; gNotify();
+  const g = (GAMES || []).find(x => x.id === id);
+  try { if (g) { const a = await analyseFullGame(g, p => { GSTATUS.prog = p; gNotify(); }); if (a) anSet(id, a); } } catch(e) { console.warn(e); }
+  GSTATUS.running = null; gNotify(); gRun();
+}
+/* ---------- analiza ---------- */
+const winPct = cp => 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * Math.max(-1500, Math.min(1500, cp)))) - 1);
+function bookPlies(toks){
+  const clean = x => x.replace(/[+#!?]/g, ""); const lines = []; let best = 0;
+  (D.openings || []).forEach(o => o.variants.forEach(v => lines.push(v.moves)));
+  (D.repertoire || []).forEach(gr => gr.items.forEach(it => lines.push(it.moves)));
+  lines.forEach(l => { let k = 0; while (k < l.length && k < toks.length && clean(l[k]) === clean(toks[k])) k++; best = Math.max(best, k); });
+  return best;
+}
+function gOpeningName(g){
+  let bestN = 0, name = null;
+  (D.openings || []).forEach(o => o.variants.forEach(v => { let k = 0; while (k < v.moves.length && k < g.toks.length && v.moves[k] === g.toks[k].replace(/[+#]/g,"")) k++; if (k >= Math.max(o.base.length + 1, 3) && k > bestN) { bestN = k; name = o.name + " · " + v.name.split(" – ").pop(); } }));
+  if (name) return name;
+  return g.eco ? g.eco.replace(/\s\d.*$/, "") : "Inne otwarcie";
+}
+function sideCounts(plies, color){ const c = {}; CLS_ORDER.forEach(k => c[k] = 0); plies.forEach(p => { if (p.color === color && p.cls) c[p.cls]++; }); return c; }
+function accuracyOf(plies, color){
+  const a = plies.filter(p => p.color === color).map(p => Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * p.loss) - 3.1669)));
+  if (!a.length) return null; const mean = a.reduce((x,y) => x+y, 0) / a.length; const harm = a.length / a.reduce((x,y) => x + 1/Math.max(y, 1), 0);
+  return Math.round(((mean + harm) / 2) * 10) / 10;
+}
+async function analyseFullGame(g, onProg){
+  const ch = new Chess(); const fens = [ch.fen()]; const moves = [];
+  for (const s of g.toks) { const m = ch.move(s, { sloppy:true }); if (!m) break; moves.push(m); fens.push(ch.fen()); }
+  const MS = AnaEngine.tier === 16 ? 380 : 700; const ev = [];
+  for (let i = 0; i < fens.length; i++) { const r = await AnaEngine.eval(fens[i], MS, null, 2); if (AnaEngine.state === "failed") return null; ev.push(r || { cp:0, pv:[], lines:[] }); onProg(i / fens.length * 0.8); }
+  const book = bookPlies(g.toks); const plies = [];
+  for (let i = 0; i < moves.length; i++) {
+    const m = moves[i]; const e0 = ev[i], e1 = ev[i+1];
+    const cpBefore = e0.cp, cpAfter = -e1.cp;           // z punktu widzenia ruszającego
+    const wb = winPct(cpBefore), wa = winPct(cpAfter); const loss = Math.max(0, wb - wa);
+    const bestUci = e0.best; const playedUci = m.from + m.to + (m.promotion || "");
+    let cls;
+    if (i < book) cls = "book";
+    else if (bestUci && (bestUci === playedUci || (!m.promotion && bestUci.slice(0,4) === playedUci))) {
+      cls = "best";
+      const l2 = e0.lines && e0.lines[1];
+      if (l2 && winPct(e0.lines[0].cp) - winPct(l2.cp) >= 15 && wa >= 45) {
+        cls = "great";
+        const reply = (e1.pv || [])[0]; const t = new Chess(fens[i+1]); if (reply) t.move({ from:reply.slice(0,2), to:reply.slice(2,4), promotion:reply[4] || "q" });
+        if (material(t.fen(), m.color) - material(fens[i], m.color) <= -2 && wa >= 50) cls = "brilliant";
+      }
+    }
+    else if (loss < 2) cls = "excellent"; else if (loss < 5) cls = "good"; else if (loss < 10) cls = "inaccuracy"; else if (loss < 20) cls = "mistake"; else cls = "blunder";
+    if ((cls === "mistake" || cls === "blunder") && i > 0 && plies[i-1] && plies[i-1].loss >= 10 && wb >= 65 && wa >= 35) cls = "miss";
+    plies.push({ i, san:m.san, color:m.color, from:m.from, to:m.to, cpW: (m.color === "w" ? cpAfter : -cpAfter), cpBeforeW: (m.color === "w" ? cpBefore : -cpBefore), loss: Math.round(loss*10)/10, cls, best: bestUci, bestPv: e0.pv || [], replyPv: e1.pv || [] });
+  }
+  // pogłębiona analiza Twoich błędów (dokładniejsze warianty do komentarzy)
+  const mine = plies.filter(p => p.color === g.color && ["inaccuracy","mistake","miss","blunder"].includes(p.cls));
+  for (let k = 0; k < mine.length; k++) {
+    const p = mine[k]; const d0 = await AnaEngine.eval(fens[p.i], 1600, null, 1); const d1 = await AnaEngine.eval(fens[p.i+1], 1600, null, 1);
+    if (d0) { p.best = d0.best || p.best; p.bestPv = d0.pv || p.bestPv; p.deepBefore = d0.cp; }
+    if (d1) { p.replyPv = d1.pv || p.replyPv; p.deepAfter = -d1.cp; }
+    p.comment = errorComment(fens[p.i], p, g.color);
+    onProg(0.8 + 0.2 * (k + 1) / Math.max(1, mine.length));
+  }
+  const res = { v:1, engine:AnaEngine.name, ms:MS, ts:Date.now(), plies:plies.map(p => ({ s:p.san, c:p.color, f:p.from, t:p.to, w:Math.round(p.cpW), b:Math.round(p.cpBeforeW), l:p.loss, k:p.cls, x:p.comment || null, bp:uciToSanLine(fens[p.i], p.bestPv, 6), rp:uciToSanLine(fens[p.i+1], p.replyPv, 6) })),
+    acc:{ w:accuracyOf(plies, "w"), b:accuracyOf(plies, "b") } };
+  return res;
+}
+/* ---------- komentarze do błędów (wyłącznie z danych silnika i liczenia materiału) ---------- */
+const PNAME = { p:"pion", n:"skoczek", b:"goniec", r:"wieża", q:"hetman", k:"król" };
+function matTxt(x){ return x >= 8 ? "hetmana (lub równowartość)" : x >= 5 ? "wieżę albo jej równowartość" : x >= 3 ? "figurę" : x >= 2 ? "dwa piony" : x >= 1 ? "piona" : null; }
+function playUci(fen, uciList, n){ const g = new Chess(fen); const out = []; for (const u of (uciList || []).slice(0, n)) { const m = g.move({ from:u.slice(0,2), to:u.slice(2,4), promotion:u[4] || "q" }); if (!m) break; out.push(m); } return { g, moves:out }; }
+function forkTargets(fen, sq, attackerColor){
+  // pola, które figura na „sq” atakuje (figury przeciwnika o wartości >= 3 i król)
+  const parts = fen.split(" "); parts[1] = attackerColor; parts[3] = "-"; const g = new Chess(); if (!g.load(parts.join(" "))) return [];
+  const t = []; g.moves({ square:sq, verbose:true }).forEach(m => { if (m.captured && (VAL[m.captured] >= 3 || m.captured === "k")) t.push({ sq:m.to, p:m.captured }); });
+  return t;
+}
+function errorComment(fen, p, myColor){
+  const before = p.deepBefore !== undefined ? p.deepBefore : (p.color === "w" ? p.cpBeforeW : -p.cpBeforeW);
+  const after = p.deepAfter !== undefined ? p.deepAfter : (p.color === "w" ? p.cpW : -p.cpW);
+  const g0 = new Chess(fen); const played = g0.move(p.san, { sloppy:true }); const fen1 = g0.fen();
+  const bestM = p.best ? new Chess(fen).move({ from:p.best.slice(0,2), to:p.best.slice(2,4), promotion:p.best[4] || "q" }) : null;
+  const refL = playUci(fen1, p.replyPv, 7); const reply = refL.moves[0];
+  const bestL = playUci(fen, p.bestPv, 8);
+  const m0 = material(fen, myColor); const mRef = material(refL.g.fen(), myColor); const mBest = material(bestL.g.fen(), myColor);
+  const netLoss = mBest - mRef;
+  const out = []; const tips = [];
+  const evB = evalWords(before), evA = evalWords(after);
+  // 1. Dlaczego to błąd
+  let why = "";
+  if (after <= -9000) {
+    const n = Math.round((10000 + after) / 10);
+    why = "Ten ruch pozwala przeciwnikowi dać mata" + (n > 0 ? " w " + n + (n === 1 ? " ruchu" : " ruchach") : "") + ": " + refL.moves.slice(0, 6).map(x => "[[" + x.san + "]]").join(" ") + ".";
+    tips.push("Przed każdym ruchem sprawdź wszystkie szachy przeciwnika, a przy odsłoniętym królu także jego bicia w pobliżu króla.");
+  } else if (reply) {
+    const rw = words(reply).toLowerCase();
+    why = "Po " + "[[" + p.san + "]] przeciwnik odpowiada [[" + reply.san + "]] (" + rw + ").";
+    if (reply.captured) {
+      if (reply.to === played.to) why += " Bije figurę, którą właśnie ruszyłeś: " + PNAME[played.piece] + " na " + played.to + " stanął na polu, którego nie mogłeś utrzymać.";
+      else why += " " + ({ q:"Twój hetman", r:"Twoja wieża", b:"Twój goniec", n:"Twój skoczek", p:"Twój pion" }[reply.captured]) + " na " + reply.to + " " + (reply.captured === "r" ? "została" : "został") + " bez wystarczającej obrony.";
+      tips.push(reply.to === played.to ? "Zanim postawisz figurę, policz: ile figur przeciwnika atakuje to pole, a ile Twoich go broni?" : "Po swoim ruchu sprawdź, czy nie zostawiasz innej figury bez obrony. Ruch figury może odsłonić coś, czego broniła.");
+    }
+    const ft = forkTargets(playUci(fen1, p.replyPv, 1).g.fen(), reply.to, reply.color);
+    if (ft.length >= 2) { why += " To widły: " + PNAME[reply.piece] + " na " + reply.to + " atakuje jednocześnie " + ft.map(x => (x.p === "k" ? "króla" : PNAME[x.p]) + " na " + x.sq).join(" i ") + "."; tips.push("Po każdym ruchu sprawdź, na które pola może wskoczyć figura przeciwnika i co stamtąd zaatakuje. Najgroźniejsze są widły skoczkiem i szach z atakiem na drugą figurę."); }
+    else if (/\+/.test(reply.san)) why += " To szach, więc nie masz czasu na obronę innych figur.";
+    const lt = matTxt(netLoss);
+    if (lt) why += " W najlepszym wariancie silnika tracisz " + lt + " w porównaniu z lepszym ruchem.";
+    else if (!reply.captured) { why += " Materiał się nie zmienia, ale pozycja wyraźnie się pogarsza: przeciwnik przejmuje inicjatywę albo zyskuje trwałą przewagę."; tips.push("Gdy nie widzisz taktyki, zapytaj: co chce zrobić przeciwnik? Ruch, który tego nie utrudnia, często oddaje inicjatywę."); }
+  }
+  out.push("**Dlaczego to błąd:** " + why);
+  // 2. Co straciłeś / czego nie zyskałeś
+  const num = cp => Math.abs(cp) >= 9000 ? "mat" : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ",");
+  let lost = "Przed ruchem: " + evB + " (" + num(before) + "). Po ruchu: " + evA + " (" + num(after) + ").";
+  if (before >= 9000 && after < 9000) { const n = Math.round((10000 - before) / 10); lost = "Miałeś mata" + (n > 0 ? " w " + n + (n === 1 ? " ruchu" : " ruchach") : "") + ", a po tym ruchu zostaje: " + evA + "."; tips.push("Gdy masz atak na króla, policz najpierw wszystkie szachy i bicia. Mat często jest ukryty w forsownym wariancie."); }
+  else if (p.k === "miss" || (winPct(before) >= 65 && winPct(after) < winPct(before) - 10)) lost = "Przeciwnik chwilę wcześniej popełnił błąd i miałeś: " + evB + " (" + num(before) + "). Ten ruch oddaje dużą część tej przewagi, zostaje: " + evA + " (" + num(after) + ").";
+  out.push("**Co tracisz:** " + lost);
+  // 3. Lepszy ruch
+  if (bestM) {
+    let bt = "[[" + bestM.san + "]]: " + words(bestM).toLowerCase() + ".";
+    if (bestM.captured && VAL[bestM.captured] >= 1) bt += " Zabiera " + (bestM.captured === "q" ? "hetmana" : bestM.captured === "r" ? "wieżę" : bestM.captured === "b" ? "gońca" : bestM.captured === "n" ? "skoczka" : "piona") + " z " + bestM.to + ".";
+    if (/\+/.test(bestM.san)) bt += " Daje szach, więc przeciwnik musi odpowiedzieć na niego.";
+    const bf = forkTargets(playUci(fen, [p.best], 1).g.fen(), bestM.to, bestM.color);
+    if (bf.length >= 2) bt += " To widły: atakuje jednocześnie " + bf.map(x => (x.p === "k" ? "króla" : PNAME[x.p]) + " na " + x.sq).join(" i ") + ".";
+    const gain = mBest - m0; if (gain >= 1 && !bestM.captured) bt += " W wariancie silnika zyskujesz " + matTxt(gain) + ".";
+    bt += " Ocena po tym ruchu: " + evalWords(before) + ".";
+    out.push("**Lepiej było:** " + bt);
+  }
+  if (!tips.length) tips.push("Przed ruchem zadaj trzy pytania: jakie szachy, bicia i groźby ma przeciwnik po moim ruchu?");
+  out.push("**Na przyszłość:** " + tips[0]);
+  return out;
+}
+/* ---------- widoki ---------- */
+function gInit(){ if (GAMES) return; GAMES = gLoadLocal().map(expandGame); if (/^https?:/.test(location.protocol) && !/claude/.test(location.hostname)) gFetchAll(); else gQueueAuto(); }
+function clsBadge(k, big){ const c = CLS[k]; if (!c) return ""; return `<span class="clsb${big ? " big" : ""}" style="background:${c.c}" title="${c.n}">${c.i}</span>`; }
+function gStatusHtml(){
+  const q = GSTATUS.queue.length + (GSTATUS.running ? 1 : 0);
+  if (GSTATUS.loading) return '<span class="spin"></span> Pobieram partie z chess.com…';
+  if (GSTATUS.running) { const g = (GAMES || []).find(x => x.id === GSTATUS.running); return '<span class="spin"></span> Analizuję partię z ' + esc(g ? g.opp : "") + " (" + Math.round(GSTATUS.prog * 100) + "%)" + (q > 1 ? " · w kolejce: " + (q - 1) : ""); }
+  if (GSTATUS.err) return esc(GSTATUS.err);
+  return "Nowe partie od " + fmtDate(ANALYSIS_FROM) + " są analizowane automatycznie.";
+}
+let GFILTER = "all";
+function viewGames(){
+  setTab("partie"); $("#ttl").textContent = "Partie"; gInit();
+  const draw = () => {
+    if (!location.hash.startsWith("#partie") && location.hash !== "") { GSTATUS.listeners.delete(draw); return; }
+    const all = GAMES || []; const an = all.filter(g => anGet(g.id));
+    const list = all.filter(g => GFILTER === "all" || (GFILTER === "an" && anGet(g.id)) || (GFILTER === "err" && (() => { const a = anGet(g.id); return a && a.plies.some(p => p.c === g.color && ["mistake","miss","blunder"].includes(p.k)); })()));
+    let html = `<div class="card"><div class="kicker">Twoje partie z chess.com</div><h2>${plural(all.length, "partia", "partie", "partii")} · przeanalizowane: ${an.length}</h2><p class="small muted" style="margin:0" id="gStat">${gStatusHtml()}</p>
+      ${/^https?:/.test(location.protocol) && !/claude/.test(location.hostname) ? '<button class="btn ghost" id="gRef" style="margin-top:10px"' + (GSTATUS.loading ? " disabled" : "") + '>↻ Sprawdź nowe partie</button>' : ""}
+      ${!all.length && !GSTATUS.loading ? '<p class="small" style="margin:8px 0 0">W tej wersji aplikacji partie dodajesz przyciskiem „Odśwież moje gry” w zakładce Postępy. Na stronie GitHub pobierają się same.</p>' : ""}</div>
+      <div class="seg">${[["all","Wszystkie"],["an","Przeanalizowane"],["err","Z błędami"]].map(([k,l]) => `<button class="${GFILTER === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("")}</div><div class="list" id="gList">`;
+    let month = "";
+    list.slice(0, 150).forEach(g => {
+      const mo = g.date.slice(0,7); if (mo !== month) { month = mo; html += `<div class="kicker" style="margin:10px 2px 0">${["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][+mo.slice(5,7)-1]} ${mo.slice(0,4)}</div>`; }
+      const a = anGet(g.id); const sc = a ? sideCounts(a.plies.map(p => ({ color:p.c, cls:p.k })), g.color) : null;
+      const rc = g.res === "W" ? "var(--ok)" : g.res === "L" ? "var(--bad)" : "#b9b3a2";
+      const queued = GSTATUS.queue.includes(g.id) || GSTATUS.running === g.id;
+      html += `<button class="item gitem" data-go="partia-${g.id}" style="border-left:5px solid ${rc}"><span class="badge" style="font-family:'Noto Sans Symbols 2';font-size:22px">${g.color === "w" ? "♔" : "♚"}</span><span class="t"><b>${esc(g.opp)} (${g.oe}) · ${g.res === "W" ? "wygrana" : g.res === "L" ? "przegrana" : "remis"}</b><span>${fmtDate(g.date)} · ${esc(gOpeningName(g))} · ${plural(Math.ceil(g.toks.length/2), "ruch", "ruchy", "ruchów")}</span>
+        ${a ? `<span class="gmini"><b>${a.acc[g.color] !== null ? String(a.acc[g.color]).replace(".", ",") + "%" : ""}</b>${clsBadge("inaccuracy")}${sc.inaccuracy}${clsBadge("mistake")}${sc.mistake}${clsBadge("miss")}${sc.miss}${clsBadge("blunder")}${sc.blunder}</span>` : `<span class="gmini muted">${queued ? '<span class="spin"></span> w kolejce do analizy' : "nieprzeanalizowana"}</span>`}</span><span class="chev">›</span></button>`;
+    });
+    html += "</div>" + (list.length > 150 ? '<p class="small muted">Pokazuję 150 najnowszych partii.</p>' : "");
+    app.innerHTML = html;
+    const rb = $("#gRef"); if (rb) rb.addEventListener("click", () => { gFetchAll(); draw(); });
+    app.querySelectorAll("[data-f]").forEach(b => b.addEventListener("click", () => { GFILTER = b.dataset.f; draw(); }));
+    bindGo(app);
+  };
+  GSTATUS.listeners.clear(); GSTATUS.listeners.add(() => { const st = $("#gStat"); if (st && location.hash.startsWith("#partie")) { st.innerHTML = gStatusHtml(); if (!GSTATUS.running && !GSTATUS.loading) draw(); } });
+  draw();
+}
+function evalGraph(plies, color){
+  const W = 600, H = 120, n = plies.length; if (!n) return "";
+  const x = i => (i + 0.5) / n * W, y = cp => H - winPct(cp) / 100 * H;
+  let pts = `0,${H/2} ` + plies.map((p,i) => x(i).toFixed(1) + "," + y(p.w).toFixed(1)).join(" ") + ` ${W},${y(plies[n-1].w).toFixed(1)}`;
+  const dots = plies.map((p,i) => ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? `<circle cx="${x(i).toFixed(1)}" cy="${y(p.w).toFixed(1)}" r="5" fill="${CLS[p.k].c}" stroke="#fff" stroke-width="1.5" data-ply="${i}"/>` : "").join("");
+  return `<svg class="egraph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#2b2926"/><polygon points="${pts} ${W},${H} 0,${H}" fill="#f7f4ec"/><line x1="0" x2="${W}" y1="${H/2}" y2="${H/2}" stroke="#c9822b" stroke-width="1" stroke-dasharray="4 4"/>${dots}<rect id="egCur" x="0" y="0" width="2" height="${H}" fill="#2e7dd7"/></svg>`;
+}
+function viewGame(id){
+  setTab("partie"); $("#ttl").textContent = "Przegląd partii"; gInit();
+  const g = (GAMES || []).find(x => x.id === id); if (!g) { app.innerHTML = '<button class="back" data-go="partie">‹ Partie</button><div class="card">Nie znaleziono partii.</div>'; bindGo(app); return; }
+  const a = anGet(id);
+  const meW = g.color === "w"; const wName = meW ? "Ty" : g.opp, bName = meW ? g.opp : "Ty";
+  let html = `<button class="back" data-go="partie">‹ Partie</button>
+  <div class="card"><div class="kicker">${fmtDate(g.date)} · ${esc(gOpeningName(g))}</div><h2>${g.res === "W" ? "Wygrana" : g.res === "L" ? "Przegrana" : "Remis"} z ${esc(g.opp)} (${g.oe})</h2><p class="small muted" style="margin:0">Grałeś ${meW ? "białymi" : "czarnymi"} (${g.myElo}) · ${plural(Math.ceil(g.toks.length/2), "ruch", "ruchy", "ruchów")}${g.url ? ` · <a href="${esc(g.url)}" target="_blank" rel="noopener">otwórz na chess.com</a>` : ""}</p></div>`;
+  if (!a) {
+    const queued = GSTATUS.queue.includes(id) || GSTATUS.running === id;
+    html += `<div class="card"><div class="kicker">Analiza silnikiem</div><p style="margin-top:0">${queued ? '<span class="spin"></span> Partia czeka w kolejce albo właśnie jest analizowana. Na telefonie trwa to ok. 1 minuty.' : "Ta partia nie była jeszcze analizowana."}</p>${queued ? "" : '<button class="btn" id="anB">Przeanalizuj tę partię</button>'}<p class="small muted" id="anP"></p></div>`;
+    app.innerHTML = html; bindGo(app);
+    const b = $("#anB"); if (b) b.addEventListener("click", () => { gEnqueue(id); viewGame(id); });
+    GSTATUS.listeners.clear(); GSTATUS.listeners.add(() => { if (location.hash !== "#partia-" + id) return; if (anGet(id)) viewGame(id); else { const pp = $("#anP"); if (pp && GSTATUS.running === id) pp.innerHTML = "Postęp: " + Math.round(GSTATUS.prog * 100) + "%"; } });
+    return;
+  }
+  const P = a.plies; const cw = sideCounts(P.map(p => ({ color:p.c, cls:p.k })), "w"), cb = sideCounts(P.map(p => ({ color:p.c, cls:p.k })), "b");
+  html += `<div class="card review"><div class="kicker">Przegląd partii</div>
+    <div class="rv-head"><span></span><span class="rv-pl">${esc(wName)}<small>białe</small></span><span></span><span class="rv-pl">${esc(bName)}<small>czarne</small></span></div>
+    <div class="rv-row rv-acc"><span>Dokładność</span><span class="accw">${a.acc.w !== null ? String(a.acc.w).replace(".", ",") : "–"}</span><span></span><span class="accb">${a.acc.b !== null ? String(a.acc.b).replace(".", ",") : "–"}</span></div>
+    ${CLS_ORDER.map(k => `<div class="rv-row"><span>${CLS[k].n}</span><b style="color:${CLS[k].c}" class="${meW ? "me" : ""}">${cw[k]}</b>${clsBadge(k, true)}<b style="color:${CLS[k].c}" class="${meW ? "" : "me"}">${cb[k]}</b></div>`).join("")}
+    <p class="small muted" style="margin:8px 0 0">${esc(a.engine || "Stockfish")}, ok. ${a.ms} ms na pozycję, błędy przeliczone dokładniej. Dokładność liczona metodą podobną do Lichess, więc może się nieco różnić od chess.com.</p></div>
+  <div class="card"><div class="kicker">Przebieg oceny</div>${evalGraph(P, g.color)}<p class="small muted" style="margin:6px 0 0">Jasne pole to przewaga białych. Kropki to błędy i świetne ruchy, dotknij, żeby przejść do ruchu.</p></div>
+  <div class="card" id="gBoard"></div>
+  <div class="card" id="gComment"></div>
+  ${(() => { const errs = P.map((p,i) => ({ p, i })).filter(o => o.p.c === g.color && ["mistake","miss","blunder"].includes(o.p.k)); return errs.length ? `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><div class="planchips">${errs.map(o => `<button data-ply="${o.i}">${clsBadge(o.p.k)} ${Math.floor(o.i/2)+1}${o.i % 2 ? "…" : "."} ${fmtSan(o.p.s)}</button>`).join("")}</div></div>` : `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><p style="margin:0">Brak błędów i poważnych błędów. Świetna partia!</p></div>`; })()}`;
+  app.innerHTML = html; bindGo(app);
+  // szachownica z zapisem
+  const host = $("#gBoard"); const bh = document.createElement("div"); host.appendChild(bh);
+  const board = new Board(bh, { orient:g.color });
+  const ctrl = document.createElement("div"); ctrl.className = "lp"; ctrl.innerHTML = '<div class="ctrl"><button data-a="first">⏮</button><button data-a="prev">◀</button><button data-a="next">▶</button><button data-a="last">⏭</button></div>'; host.appendChild(ctrl);
+  const chips = document.createElement("div"); chips.className = "chips gchips"; host.appendChild(chips);
+  const fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]; const gg = new Chess(); P.forEach(p => { gg.move(p.s, { sloppy:true }); fens.push(gg.fen()); });
+  chips.innerHTML = P.map((p,i) => `<button class="chip" data-i="${i}">${i % 2 === 0 ? `<span class="n">${i/2+1}.</span>` : ""}${fmtSan(p.s)}${["brilliant","great","inaccuracy","mistake","miss","blunder"].includes(p.k) ? clsBadge(p.k) : ""}</button>`).join("");
+  let idx = -1;
+  function show(i){
+    idx = Math.max(-1, Math.min(P.length - 1, i)); const p = P[idx];
+    board.set(fens[idx+1], { last: p ? { f:p.f, t:p.t } : null, marks: p && ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? [{ sq:p.t, c:hexA(CLS[p.k].c, .95) }] : [] });
+    chips.querySelectorAll(".chip").forEach((c,j) => c.classList.toggle("on", j === idx));
+    const on = chips.querySelector(".chip.on"); if (on && on.scrollIntoView) on.scrollIntoView({ block:"nearest", inline:"nearest" });
+    const cur = document.getElementById("egCur"); if (cur) cur.setAttribute("x", idx < 0 ? 0 : ((idx + 0.5) / P.length * 600 - 1).toFixed(1));
+    renderComment(p, idx);
+  }
+  function renderComment(p, i){
+    const C = $("#gComment");
+    if (!p) { C.innerHTML = '<div class="kicker">Komentarz</div><p style="margin:0" class="muted">Pozycja początkowa. Naciśnij ▶ albo dotknij ruchu w zapisie.</p>'; return; }
+    const mine = p.c === g.color; const cl = CLS[p.k];
+    const pm = new Chess(fens[i]).move(p.s, { sloppy:true });
+    let h = `<div class="cm-head">${clsBadge(p.k, true)}<div><b>${Math.floor(i/2)+1}${i % 2 ? "…" : "."} ${fmtSan(p.s)}</b> to ${cl.n.toLowerCase()} <span class="muted small">(${mine ? "Twój ruch" : "ruch przeciwnika"})</span><div class="small muted">${esc(words(pm))}</div></div></div>`;
+    const evTxt = (cp) => (Math.abs(cp) >= 9000 ? (cp > 0 ? "+M" : "−M") + Math.round((10000 - Math.abs(cp)) / 10) : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ","));
+    h += `<div class="small" style="margin:6px 0">Ocena: ${evTxt(p.b)} → <b>${evTxt(p.w)}</b> (z punktu widzenia białych)</div>`;
+    if (p.x && mine) h += `<div class="cm-body">${p.x.map(t => "<p>" + rich(t) + "</p>").join("")}</div><div id="cmLines"></div>`;
+    else if (mine && ["inaccuracy","mistake","miss","blunder"].includes(p.k)) h += `<p class="small muted">Brak szczegółowego komentarza dla tego ruchu.</p>`;
+    else if (!mine && ["mistake","miss","blunder"].includes(p.k) && p.bp && p.bp.length) h += "<p>" + rich("Przeciwnik się pomylił. Lepiej było [[" + p.bp[0] + "]]. Sprawdź w następnym ruchu, czy to wykorzystałeś.") + "</p>";
+    else if (["best","great","brilliant"].includes(p.k)) h += `<p style="margin:0">${p.k === "brilliant" ? "Genialny ruch: najlepszy, jedyny dobry i z ofiarą materiału." : p.k === "great" ? "Wspaniały ruch: jedyny, który utrzymywał przewagę lub równowagę." : "Ruch zgodny z pierwszym wyborem silnika."}</p>`;
+    C.innerHTML = `<div class="kicker">Komentarz</div>` + h;
+    if (p.x && mine) {
+      const L = $("#cmLines");
+      [["Najlepszy wariant", fens[i], p.bp, "rgba(47,125,79,.9)"], ["Odpowiedź przeciwnika na Twój ruch", fens[i+1], p.rp, "rgba(180,68,47,.85)"]].forEach(([lab, f, line, col]) => {
+        if (!line || !line.length) return; const d = document.createElement("details"); d.className = "box"; d.innerHTML = "<summary>" + lab + ": " + line.slice(0,4).map(x => fmtSan(x)).join(" ") + "…</summary>"; L.appendChild(d);
+        let built = false; d.addEventListener("toggle", () => { if (d.open && !built) { built = true; const hh = document.createElement("div"); hh.style.paddingBottom = "12px"; d.appendChild(hh); linePlayer(hh, f, line, { orient:g.color, firstArrow:true, arrowColor:col }); } });
+      });
+    }
+  }
+  ctrl.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; const act = b.dataset.a; show(act === "first" ? -1 : act === "prev" ? idx - 1 : act === "next" ? idx + 1 : P.length - 1); });
+  chips.addEventListener("click", e => { const c = e.target.closest(".chip"); if (c) show(+c.dataset.i); });
+  app.querySelectorAll("[data-ply]").forEach(el => el.addEventListener("click", () => { show(+el.dataset.ply); $("#gBoard").scrollIntoView({ behavior:"smooth", block:"start" }); }));
+  const eg = app.querySelector(".egraph"); if (eg) eg.addEventListener("click", e => { if (e.target.dataset && e.target.dataset.ply) return; const r = eg.getBoundingClientRect(); show(Math.floor((e.clientX - r.left) / r.width * P.length)); });
+  let firstErr = P.findIndex(p => p.c === g.color && ["mistake","miss","blunder"].includes(p.k)); if (firstErr < 0) firstErr = P.findIndex(p => p.c === g.color && p.k === "inaccuracy");
+  show(firstErr >= 0 ? firstErr : -1);
+}
+function hexA(hex, a){ const n = parseInt(hex.slice(1), 16); return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; }
+
 /* ---------------- automatyczna aktualizacja (GitHub Pages) ---------------- */
 // Telefon może trzymać stare pliki w pamięci. Sprawdzamy numer wersji na serwerze i w razie różnicy przeładowujemy stronę z nowymi plikami.
 (function checkVersion(){
@@ -1195,4 +1491,5 @@ window.__selfTest = function(){
 })();
 route();
 if (S.settings.engine) setTimeout(() => Engine.start(), 1500);
+setTimeout(() => { try { gInit(); } catch(e) { console.warn(e); } }, 4000);   // pobierz nowe partie i analizuj je w tle
 })();
