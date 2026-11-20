@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120181523";
+const APP_VERSION = "20261120182209";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -50,6 +50,7 @@ function words(m){
   return t;
 }
 function toast(msg){ const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(()=>t.remove(), 2200); }
+function fmtEv(cpW){ if (cpW === null || cpW === undefined || isNaN(cpW)) return "–"; if (Math.abs(cpW) >= 9000) { const n = Math.max(1, Math.round((10000 - Math.abs(cpW)) / 10)); return (cpW > 0 ? "+M" : "−M") + n; } return (cpW > 0.5 ? "+" : cpW < -0.5 ? "−" : "") + (Math.abs(cpW)/100).toFixed(1).replace(".", ","); }
 function evalWords(cp, me){ // cp from "me" perspective
   if (cp === null || cp === undefined || isNaN(cp)) return "brak oceny";
   const a = Math.abs(cp);
@@ -310,7 +311,8 @@ function linePlayer(host, startFen, moves, o={}){
     const cpMe = (gg.turn() === me ? 1 : -1) * r.cp;
     const rep = r.best ? new Chess(fen).move({ from:r.best.slice(0,2), to:r.best.slice(2,4), promotion:r.best[4] || "q" }) : null;
     const line = uciToSanLine(fen, r.pv, 5);
-    html += '<div style="margin-top:6px"><b>Ocena (' + esc(Engine.name || "silnik") + ', 2,5 s):</b> ' + esc(evalWords(cpMe)) + "</div>";
+    const cpWl = gg.turn() === "w" ? r.cp : -r.cp; EVCACHE.set(fen.split(" ").slice(0,4).join(" "), cpWl); board.showEval(cpWl);
+    html += '<div style="margin-top:6px"><b>Ocena: ' + fmtEv(cpWl) + "</b></div>";
     if (rep) html += '<div>Najlepsza odpowiedź ' + (rep.color === "w" ? "białych" : "czarnych") + ': <span class="mv">' + fmtSan(rep.san) + "</span> " + esc(words(rep).toLowerCase()) + "</div>" + (line.length > 1 ? '<div class="small muted">Dalej silnik widzi: ' + line.map(x => fmtSan(x)).join(" ") + "</div>" : "");
     desc.innerHTML = html + '<div class="row" style="margin-top:8px">' + (rep ? '<button class="btn sbPlay" style="min-height:42px;font-size:14px">Zagraj tę odpowiedź</button>' : "") + '<button class="btn sec sbBack" style="min-height:42px;font-size:14px">Wróć do wariantu</button></div>';
     board.arrows = rep ? [{ f:rep.from, t:rep.to, c:"rgba(40,110,200,.85)" }] : []; board.render();
@@ -535,7 +537,7 @@ function evalGauge(cpWhite, myColor){
   return `<div class="gauge"><div class="gauge-top"><span>Ocena silnika po 6. ruchu</span><b>${num}</b></div>
     <div class="gbar"><i style="width:${share}%"></i><span class="gmid"></span><span class="gmark" style="left:${share}%"></span></div>
     <div class="gauge-lbl"><span>białe</span><span>czarne</span></div>
-    <div class="gauge-txt">${esc(evalWords(mine).replace(/^./, c => c.toUpperCase()))}${Math.abs(mine) < 50 ? "" : ""} · grasz ${myColor === "w" ? "białymi" : "czarnymi"}</div></div>`;
+    <div class="gauge-txt">Grasz ${myColor === "w" ? "białymi" : "czarnymi"}</div></div>`;
 }
 function resultsViz(st, all){
   const n = st.n || (st.w + st.d + st.l); const pv = scorePct(st), pa = scorePct(all);
@@ -727,9 +729,9 @@ function viewExercise(id){
     let v = "";
     if (!res) v = '<div class="verdict mid">Oto rozwiązanie. Wróć do tej pozycji później i spróbuj samodzielnie.</div>';
     else if (res.kind === "ok") v = '<div class="verdict ok">✓ <b>Brawo!</b> <span class="mv">' + fmtSan(m.san) + "</span> to najlepszy ruch. Przeczytaj analizę, żeby utrwalić motyw.</div>";
-    else if (res.kind === "alt") v = '<div class="verdict ok">✓ <b>Dobry ruch!</b> <span class="mv">' + fmtSan(m.san) + '</span> silnik ocenia prawie tak samo jak najlepszy (' + esc(evalWords(res.user)) + '). Najdokładniejszy był jednak <span class="mv">' + fmtSan(e.best[0]) + "</span>.</div>";
+    else if (res.kind === "alt") v = '<div class="verdict ok">✓ <b>Dobry ruch!</b> <span class="mv">' + fmtSan(m.san) + '</span> silnik ocenia prawie tak samo jak najlepszy (' + fmtEv(e.c === "w" ? res.user : -res.user) + '). Najdokładniejszy był jednak <span class="mv">' + fmtSan(e.best[0]) + "</span>.</div>";
     else if (res.kind === "same") v = '<div class="verdict bad">✗ To ten sam ruch, który zagrałeś w partii: <span class="mv">' + fmtSan(m.san) + "</span>. Zobacz poniżej, co go obala.</div>";
-    else v = '<div class="verdict bad">✗ <b>Nie tym razem.</b> Twój ruch <span class="mv">' + fmtSan(m.san) + "</span>: " + esc(words(m).toLowerCase()) + (res.user !== null && res.user !== undefined ? ". Ocena silnika: " + esc(evalWords(res.user)) : "") + ".</div>";
+    else v = '<div class="verdict bad">✗ <b>Nie tym razem.</b> Twój ruch <span class="mv">' + fmtSan(m.san) + "</span>: " + esc(words(m).toLowerCase()) + (res.user !== null && res.user !== undefined ? ". Ocena silnika: " + fmtEv(e.c === "w" ? res.user : -res.user) : "") + ".</div>";
     $("#exMsg").innerHTML = v + `<div class="row"><button class="btn sec" id="againB">Spróbuj ponownie</button><button class="btn" id="nextB">Następne ›</button></div>`;
     $("#againB").addEventListener("click", () => { $("#analysis").innerHTML = ""; reset(); });
     $("#nextB").addEventListener("click", () => { const l = allExercises().filter(x => x.ph === e.ph); let i = l.indexOf(e), n = null; for (let k = 1; k <= l.length; k++) { const c = l[(i+k) % l.length]; if (!isMis(c.id) || c === e) { n = c; break; } } go("ex-" + (n || e).id); });
@@ -1120,11 +1122,11 @@ function autoExercise(c, best, ref, eb, ea){
   const lostMat = m0 - mEnd;
   const matTxt = lostMat >= 8 ? "hetmana" : lostMat >= 5 ? "wieżę (lub jej równowartość)" : lostMat >= 3 ? "figurę" : lostMat >= 1 ? "piona" : null;
   const reply = ref[1];
-  let whyBad = "Po [[" + c.move.san + "]] przeciwnik ma mocną odpowiedź" + (reply ? ": [[" + reply + "]]" : "") + ". Ocena spada z „" + evalWords(eb) + "” do „" + evalWords(ea) + "”.";
+  let whyBad = "Po [[" + c.move.san + "]] przeciwnik ma mocną odpowiedź" + (reply ? ": [[" + reply + "]]" : "") + ". Ocena spada z " + fmtEv(color === "w" ? eb : -eb) + " do " + fmtEv(color === "w" ? ea : -ea) + ".";
   if (matTxt) whyBad += " W tym wariancie tracisz " + matTxt + ".";
   if (/#/.test(ref.join(" "))) whyBad += " Wariant kończy się matem.";
   const bm = g.move(best[0]);
-  let whyGood = "Silnik poleca [[" + best[0] + "]]" + (bm ? " (" + words(bm).toLowerCase() + ")" : "") + ". Ocena: „" + evalWords(eb) + "”." + (bm && bm.captured ? " Ten ruch coś zbija, więc sprawdź, czy figura przeciwnika nie stała bez obrony." : "") + (bm && /\+/.test(bm.san) ? " To ruch z szachem. Szachy zawsze sprawdzaj w pierwszej kolejności." : "");
+  let whyGood = "Silnik poleca [[" + best[0] + "]]" + (bm ? " (" + words(bm).toLowerCase() + ")" : "") + ". Ocena: " + fmtEv(color === "w" ? eb : -eb) + "." + (bm && bm.captured ? " Ten ruch coś zbija, więc sprawdź, czy figura przeciwnika nie stała bez obrony." : "") + (bm && /\+/.test(bm.san) ? " To ruch z szachem. Szachy zawsze sprawdzaj w pierwszej kolejności." : "");
   const look = ["Po ruchu przeciwnika zapytaj: co on teraz atakuje? Co mi grozi?", "Przed swoim ruchem sprawdź szachy i bicia, jakie będzie miał przeciwnik.", "Poproś trenera o pełne wyjaśnienie poniżej."];
   const lastObj = c.prev;
   return { id:"n" + G.id + "-" + (c.i+1), auto:true, ph:c.ph, c:color, theme:"Nowa pozycja z Twojej partii", fen:c.fen, hist:G.toks.slice(0, c.i), last: lastObj ? { f:lastObj.from, t:lastObj.to } : null, opp:G.opp, oe:G.oe, me:G.myElo, date:G.date, url:G.url, res:G.res, mv:Math.floor(c.i/2)+1, my:c.move.san, eb, ea, task:"Pozycja z Twojej nowej partii. Znajdź najlepszy ruch.", hint:"Sprawdź wszystkie szachy i bicia, swoje i przeciwnika.", best, ref, whyBad, whyGood, look };
@@ -1306,12 +1308,11 @@ async function analyseFullGame(g, onProg){
   const mine = plies.filter(p => p.color === g.color && ["inaccuracy","mistake","miss","blunder"].includes(p.cls));
   for (let k = 0; k < mine.length; k++) {
     const p = mine[k]; const d0 = await AnaEngine.eval(fens[p.i], 1600, null, 1); const d1 = await AnaEngine.eval(fens[p.i+1], 1600, null, 1);
-    if (d0) { p.best = d0.best || p.best; p.bestPv = d0.pv || p.bestPv; p.deepBefore = d0.cp; }
-    if (d1) { p.replyPv = d1.pv || p.replyPv; p.deepAfter = -d1.cp; }
-    p.comment = errorComment(fens[p.i], p, g.color);
+    if (d0) { p.best = d0.best || p.best; p.bestPv = d0.pv || p.bestPv; const v = p.color === "w" ? d0.cp : -d0.cp; p.cpBeforeW = v; if (plies[p.i-1]) plies[p.i-1].cpW = v; }
+    if (d1) { p.replyPv = d1.pv || p.replyPv; const v = p.color === "w" ? -d1.cp : d1.cp; p.cpW = v; if (plies[p.i+1]) plies[p.i+1].cpBeforeW = v; }
     onProg(0.8 + 0.2 * (k + 1) / Math.max(1, mine.length));
   }
-  const res = { v:1, engine:AnaEngine.name, ms:MS, ts:Date.now(), plies:plies.map(p => ({ s:p.san, c:p.color, f:p.from, t:p.to, w:Math.round(p.cpW), b:Math.round(p.cpBeforeW), l:p.loss, k:p.cls, x:p.comment || null, bp:uciToSanLine(fens[p.i], p.bestPv, 6), rp:uciToSanLine(fens[p.i+1], p.replyPv, 6) })),
+  const res = { v:1, engine:AnaEngine.name, ms:MS, ts:Date.now(), plies:plies.map(p => ({ s:p.san, c:p.color, f:p.from, t:p.to, w:Math.round(p.cpW), b:Math.round(p.cpBeforeW), l:p.loss, k:p.cls, bp:uciToSanLine(fens[p.i], p.bestPv, 8), rp:uciToSanLine(fens[p.i+1], p.replyPv, 7) })),
     acc:{ w:accuracyOf(plies, "w"), b:accuracyOf(plies, "b") } };
   return res;
 }
@@ -1330,12 +1331,13 @@ function errorComment(fen, p, myColor){
   const after = p.deepAfter !== undefined ? p.deepAfter : (p.color === "w" ? p.cpW : -p.cpW);
   const g0 = new Chess(fen); const played = g0.move(p.san, { sloppy:true }); const fen1 = g0.fen();
   const bestM = p.best ? new Chess(fen).move({ from:p.best.slice(0,2), to:p.best.slice(2,4), promotion:p.best[4] || "q" }) : null;
-  const refL = playUci(fen1, p.replyPv, 7); const reply = refL.moves[0];
-  const bestL = playUci(fen, p.bestPv, 8);
+  const depth = Math.min(8, (p.bestPv || []).length, (p.replyPv || []).length + 1);
+  const refL = playUci(fen1, p.replyPv, Math.max(1, depth - 1)); const reply = refL.moves[0];
+  const bestL = playUci(fen, p.bestPv, depth);
   const m0 = material(fen, myColor); const mRef = material(refL.g.fen(), myColor); const mBest = material(bestL.g.fen(), myColor);
   const netLoss = mBest - mRef;
   const out = []; const tips = [];
-  const evB = evalWords(before), evA = evalWords(after);
+  const W = cp => myColor === "w" ? cp : -cp; const evB = fmtEv(W(before)), evA = fmtEv(W(after));
   // 1. Dlaczego to błąd
   let why = "";
   if (after <= -9000) {
@@ -1359,10 +1361,9 @@ function errorComment(fen, p, myColor){
   }
   out.push("**Dlaczego to błąd:** " + why);
   // 2. Co straciłeś / czego nie zyskałeś
-  const num = cp => Math.abs(cp) >= 9000 ? "mat" : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ",");
-  let lost = "Przed ruchem: " + evB + " (" + num(before) + "). Po ruchu: " + evA + " (" + num(after) + ").";
-  if (before >= 9000 && after < 9000) { const n = Math.round((10000 - before) / 10); lost = "Miałeś mata" + (n > 0 ? " w " + n + (n === 1 ? " ruchu" : " ruchach") : "") + ", a po tym ruchu zostaje: " + evA + "."; tips.push("Gdy masz atak na króla, policz najpierw wszystkie szachy i bicia. Mat często jest ukryty w forsownym wariancie."); }
-  else if (p.k === "miss" || (winPct(before) >= 65 && winPct(after) < winPct(before) - 10)) lost = "Przeciwnik chwilę wcześniej popełnił błąd i miałeś: " + evB + " (" + num(before) + "). Ten ruch oddaje dużą część tej przewagi, zostaje: " + evA + " (" + num(after) + ").";
+  let lost = "Ocena przed ruchem " + evB + ", po ruchu " + evA + ".";
+  if (before >= 9000 && after < 9000) { const n = Math.round((10000 - before) / 10); lost = "Miałeś mata" + (n > 0 ? " w " + n + (n === 1 ? " ruchu" : " ruchach") : "") + ", a po tym ruchu ocena to " + evA + "."; tips.push("Gdy masz atak na króla, policz najpierw wszystkie szachy i bicia. Mat często jest ukryty w forsownym wariancie."); }
+  else if (p.k === "miss") lost = "Przeciwnik chwilę wcześniej popełnił błąd i ocena wynosiła " + evB + ". Ten ruch oddaje dużą część tej przewagi, zostaje " + evA + ".";
   out.push("**Co tracisz:** " + lost);
   // 3. Lepszy ruch
   if (bestM) {
@@ -1372,7 +1373,7 @@ function errorComment(fen, p, myColor){
     const bf = forkTargets(playUci(fen, [p.best], 1).g.fen(), bestM.to, bestM.color);
     if (bf.length >= 2) bt += " To widły: atakuje jednocześnie " + bf.map(x => (x.p === "k" ? "króla" : PNAME[x.p]) + " na " + x.sq).join(" i ") + ".";
     const gain = mBest - m0; if (gain >= 1 && !bestM.captured) bt += " W wariancie silnika zyskujesz " + matTxt(gain) + ".";
-    bt += " Ocena po tym ruchu: " + evalWords(before) + ".";
+    bt += " Ocena po tym ruchu: " + evB + ".";
     out.push("**Lepiej było:** " + bt);
   }
   if (!tips.length) tips.push("Przed ruchem zadaj trzy pytania: jakie szachy, bicia i groźby ma przeciwnik po moim ruchu?");
@@ -1459,6 +1460,10 @@ function viewGame(id){
   const fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]; const gg = new Chess(); P.forEach(p => { gg.move(p.s, { sloppy:true }); fens.push(gg.fen()); });
   chips.innerHTML = P.map((p,i) => `<button class="chip" data-i="${i}">${i % 2 === 0 ? `<span class="n">${i/2+1}.</span>` : ""}${fmtSan(p.s)}${["brilliant","great","inaccuracy","mistake","miss","blunder"].includes(p.k) ? clsBadge(p.k) : ""}</button>`).join("");
   let idx = -1, sb = null, sbTok = 0;
+  const evKey = f => f.split(" ").slice(0,4).join(" ");
+  fens.forEach((f, k) => { const v = k === 0 ? (P[0] && P[0].b) : P[k-1].w; if (v !== undefined && v !== null) EVCACHE.set(evKey(f), v); });
+  const sanToUci = (fen, sans) => { const t = new Chess(fen); const out = []; for (const x of sans || []) { const m = t.move(x, { sloppy:true }); if (!m) break; out.push(m.from + m.to + (m.promotion || "")); } return out; };
+  const buildComment = i => { const q = P[i]; const bp = sanToUci(fens[i], q.bp), rp = sanToUci(fens[i+1], q.rp); try { return errorComment(fens[i], { san:q.s, color:q.c, cpBeforeW:q.b, cpW:q.w, best:bp[0], bestPv:bp, replyPv:rp, k:q.k }, g.color); } catch(e) { console.warn(e); return null; } };
   const cpTxtW = cp => (Math.abs(cp) >= 9000 ? (cp > 0 ? "+M" : "−M") + Math.max(1, Math.round((10000 - Math.abs(cp)) / 10)) : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ","));
   function userMove(m){
     if (!sb && P[idx+1] && m.san === P[idx+1].s) { show(idx+1); return; }
@@ -1473,7 +1478,7 @@ function viewGame(id){
     const list = sb.moves.map((x, k) => { const ply = sb.base + 1 + k; return (ply % 2 === 0 ? (ply/2 + 1) + ". " : (k === 0 ? Math.floor(ply/2) + 1 + "… " : "")) + '<span class="mv">' + fmtSan(x.san) + "</span>"; }).join(" ");
     const real = P[sb.base + 1];
     let html = `<div class="kicker">🔍 Twój wariant (Co jeśli…?)</div><div style="font-size:16px;line-height:1.7">${list}</div><div class="small muted">${esc(words(sb.moves[sb.moves.length-1]))}</div>`;
-    if (real && sb.moves.length === 1) html += `<div class="small" style="margin-top:6px">W partii zagrano <span class="mv">${fmtSan(real.s)}</span> (ocena po nim ${cpTxtW(real.w)}).</div>`;
+    if (real && sb.moves.length === 1) html += `<div class="small" style="margin-top:6px">W partii zagrano <span class="mv">${fmtSan(real.s)}</span> (ocena po nim ${fmtEv(real.w)}).</div>`;
     const btns = (extra) => `<div class="row" style="margin-top:10px">${extra || ""}<button class="btn sec sbUndo" style="min-height:42px;font-size:14px">↶ Cofnij</button><button class="btn sec sbBack" style="min-height:42px;font-size:14px">Wróć do partii</button></div>`;
     const done = (h, extra) => { C.innerHTML = h + btns(extra) + '<p class="small muted" style="margin:8px 0 0">Graj dalej na planszy za obie strony. Każda pozycja jest liczona na nowo.</p>'; bindSb(); };
     if (gg.in_checkmate()) return done(html + "<p><b>Mat!</b></p>");
@@ -1485,13 +1490,14 @@ function viewGame(id){
     const r = await Engine.eval(fen, 2500, null, 3); if (t !== sbTok) return;
     if (!r) return done(html + '<p class="small muted">Nie udało się policzyć tej pozycji.</p>');
     const sign = gg.turn() === "w" ? 1 : -1; const cpW = sign * r.cp; const meCp = g.color === "w" ? cpW : -cpW;
-    html += `<div style="margin-top:8px;font-size:17px"><b>Ocena: ${cpTxtW(cpW)}</b> <span class="small muted">(z punktu widzenia białych)</span></div><div class="small">${esc(evalWords(meCp))}</div>`;
+    EVCACHE.set(fen.split(" ").slice(0,4).join(" "), cpW); board.showEval(cpW);
+    html += `<div style="margin-top:8px;font-size:17px"><b>Ocena: ${fmtEv(cpW)}</b></div>`;
     const lines = (r.lines && r.lines.length ? r.lines : [{ cp:r.cp, pv:r.pv }]).slice(0, 3);
     const cols = ["rgba(40,110,200,.9)", "rgba(40,110,200,.5)", "rgba(40,110,200,.32)"]; const arrows = [];
     html += `<div class="small" style="margin-top:8px"><b>Najlepsze ruchy ${gg.turn() === "w" ? "białych" : "czarnych"} (${esc(Engine.name || "silnik")}, 2,5 s):</b></div><ol class="sbl">` + lines.map((l, k) => {
       const san = uciToSanLine(fen, l.pv, 6); if (!san.length) return "";
       const mm = new Chess(fen).move(san[0], { sloppy:true }); if (mm) arrows.push({ f:mm.from, t:mm.to, c:cols[k] });
-      return `<li><b>${cpTxtW(sign * l.cp)}</b> <span class="mv">${fmtSan(san[0])}</span> <span class="muted">${san.slice(1).map(x => fmtSan(x)).join(" ")}</span></li>`; }).join("") + "</ol>";
+      return `<li><b>${fmtEv(sign * l.cp)}</b> <span class="mv">${fmtSan(san[0])}</span> <span class="muted">${san.slice(1).map(x => fmtSan(x)).join(" ")}</span></li>`; }).join("") + "</ol>";
     board.arrows = arrows; board.render();
     const best = lines[0] && lines[0].pv && lines[0].pv[0];
     done(html, best ? '<button class="btn sbPlay" style="min-height:42px;font-size:14px">Zagraj najlepszy</button>' : "");
@@ -1526,8 +1532,9 @@ function viewGame(id){
     const pm = new Chess(fens[i]).move(p.s, { sloppy:true });
     let h = `<div class="cm-head">${clsBadge(p.k, true)}<div><b>${Math.floor(i/2)+1}${i % 2 ? "…" : "."} ${fmtSan(p.s)}</b> to ${cl.n.toLowerCase()} <span class="muted small">(${mine ? "Twój ruch" : "ruch przeciwnika"})</span><div class="small muted">${esc(words(pm))}</div></div></div>`;
     const evTxt = (cp) => (Math.abs(cp) >= 9000 ? (cp > 0 ? "+M" : "−M") + Math.round((10000 - Math.abs(cp)) / 10) : (cp >= 0 ? "+" : "−") + (Math.abs(cp)/100).toFixed(1).replace(".", ","));
-    h += `<div class="small" style="margin:6px 0">Ocena: ${evTxt(p.b)} → <b>${evTxt(p.w)}</b> (z punktu widzenia białych)</div>`;
-    if (p.x && mine) h += `<div class="cm-body">${p.x.map(t => "<p>" + rich(t) + "</p>").join("")}</div><div id="cmLines"></div>`;
+    h += `<div class="small" style="margin:6px 0">Ocena: ${fmtEv(p.b)} → <b>${fmtEv(p.w)}</b></div>`;
+    const cx = mine && ["inaccuracy","mistake","miss","blunder"].includes(p.k) && p.bp && p.bp.length ? buildComment(i) : null;
+    if (cx) h += `<div class="cm-body">${cx.map(t => "<p>" + rich(t) + "</p>").join("")}</div><div id="cmLines"></div>`;
     else if (mine && ["inaccuracy","mistake","miss","blunder"].includes(p.k)) h += `<p class="small muted">Brak szczegółowego komentarza dla tego ruchu.</p>`;
     else if (!mine && ["mistake","miss","blunder"].includes(p.k) && p.bp && p.bp.length) h += "<p>" + rich("Przeciwnik się pomylił. Lepiej było [[" + p.bp[0] + "]]. Sprawdź w następnym ruchu, czy to wykorzystałeś.") + "</p>";
     else if (["best","great","brilliant"].includes(p.k)) h += `<p style="margin:0">${p.k === "brilliant" ? "Genialny ruch: najlepszy, jedyny dobry i z ofiarą materiału." : p.k === "great" ? "Wspaniały ruch: jedyny, który utrzymywał przewagę lub równowagę." : "Ruch zgodny z pierwszym wyborem silnika."}</p>`;
@@ -1536,7 +1543,7 @@ function viewGame(id){
     h += `<p class="small muted" style="margin:8px 0 0">Możesz zagrać na planszy dowolny ruch. Stockfish od razu go oceni.</p>`;
     C.innerHTML = `<div class="kicker">Komentarz</div>` + h;
     const tb = C.querySelector(".cmTry"); if (tb) tb.addEventListener("click", () => { show(i - 1); toast("Pozycja przed Twoim ruchem. Zagraj na planszy inny ruch."); });
-    if (p.x && mine) {
+    if (cx) {
       const L = $("#cmLines");
       [["Najlepszy wariant", fens[i], p.bp, "rgba(47,125,79,.9)"], ["Odpowiedź przeciwnika na Twój ruch", fens[i+1], p.rp, "rgba(180,68,47,.85)"]].forEach(([lab, f, line, col]) => {
         if (!line || !line.length) return; const d = document.createElement("details"); d.className = "box"; d.innerHTML = "<summary>" + lab + ": " + line.slice(0,4).map(x => fmtSan(x)).join(" ") + "…</summary>"; L.appendChild(d);
@@ -1567,6 +1574,10 @@ function hexA(hex, a){ const n = parseInt(hex.slice(1), 16); return "rgba(" + (n
     location.replace(location.pathname + "?v=" + encodeURIComponent(j.v) + location.hash);
   }).catch(() => {});
 })();
+// migracja: w zapisanych automatycznych ćwiczeniach słowny opis oceny zamieniamy na liczbę
+(S.imported.exercises || []).forEach(e => { const W = cp => fmtEv(e.c === "w" ? cp : -cp);
+  if (e.whyBad) e.whyBad = e.whyBad.replace(/Ocena spada z „[^”]*” do „[^”]*”\./, "Ocena spada z " + W(e.eb) + " do " + W(e.ea) + ".");
+  if (e.whyGood) e.whyGood = e.whyGood.replace(/Ocena: „[^”]*”\./, "Ocena: " + W(e.eb) + "."); });
 route();
 if (S.settings.engine) setTimeout(() => Engine.start(), 1500);
 setTimeout(() => { try { gInit(); } catch(e) { console.warn(e); } }, 4000);   // pobierz nowe partie i analizuj je w tle
