@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120083439";
+const APP_VERSION = "20261120083646";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -29,6 +29,9 @@ function rich(str){
   let s = esc(str);
   s = s.replace(/\[\[([^\]]+)\]\]/g, (a,san) => '<span class="mv">'+fmtSan(san.replace(/&amp;/g,"&"))+'</span>');
   s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  // odwołania do ćwiczeń („ćwiczenia o1 i o2”, „ćwiczenie e7”, „ćwiczeń m2, m5, m8”) -> klikalne odnośniki
+  s = s.replace(/(ćwiczeni[aeu]|ćwiczeń)((?:\s*(?:,|i|oraz)?\s*[ome]\d{1,2}\b)+)/g, (all, word, list) =>
+    word + list.replace(/\b([ome]\d{1,2})\b/g, id => { const e = (typeof exById === "function") ? exById(id) : null; return e ? '<a class="exlink" href="#ex-' + id + '" title="' + esc(e.theme) + '">' + id + " · " + esc(e.theme) + "</a>" : id; }));
   return s;
 }
 const NOM = { p:"pion", n:"skoczek", b:"goniec", r:"wieża", q:"hetman", k:"król" };
