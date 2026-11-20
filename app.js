@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120175948";
+const APP_VERSION = "20261120180543";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -1447,25 +1447,32 @@ function viewGame(id){
     ${CLS_ORDER.map(k => `<div class="rv-row"><span>${CLS[k].n}</span><b style="color:${CLS[k].c}" class="${meW ? "me" : ""}">${cw[k]}</b>${clsBadge(k, true)}<b style="color:${CLS[k].c}" class="${meW ? "" : "me"}">${cb[k]}</b></div>`).join("")}
     <p class="small muted" style="margin:8px 0 0">${esc(a.engine || "Stockfish")}, ok. ${a.ms} ms na pozycję, błędy przeliczone dokładniej. Dokładność liczona metodą podobną do Lichess, więc może się nieco różnić od chess.com.</p></div>
   <div class="card"><div class="kicker">Przebieg oceny</div>${evalGraph(P, g.color)}<p class="small muted" style="margin:6px 0 0">Jasne pole to przewaga białych. Kropki to błędy i świetne ruchy, dotknij, żeby przejść do ruchu.</p></div>
-  <div class="card" id="gBoard"></div>
-  <div class="card" id="gComment"></div>
-  ${(() => { const errs = P.map((p,i) => ({ p, i })).filter(o => o.p.c === g.color && ["mistake","miss","blunder"].includes(o.p.k)); return errs.length ? `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><div class="planchips">${errs.map(o => `<button data-ply="${o.i}">${clsBadge(o.p.k)} ${Math.floor(o.i/2)+1}${o.i % 2 ? "…" : "."} ${fmtSan(o.p.s)}</button>`).join("")}</div></div>` : `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><p style="margin:0">Brak błędów i poważnych błędów. Świetna partia!</p></div>`; })()}`;
+  ${(() => { const errs = P.map((p,i) => ({ p, i })).filter(o => o.p.c === g.color && ["mistake","miss","blunder"].includes(o.p.k)); return errs.length ? `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><div class="planchips">${errs.map(o => `<button data-ply="${o.i}">${clsBadge(o.p.k)} ${Math.floor(o.i/2)+1}${o.i % 2 ? "…" : "."} ${fmtSan(o.p.s)}</button>`).join("")}</div></div>` : `<div class="card"><div class="kicker">Twoje błędy w tej partii</div><p style="margin:0">Brak błędów i poważnych błędów. Świetna partia!</p></div>`; })()}
+  <div class="card gpin${S.settings.pin === false ? "" : " on"}" id="gBoard"></div>
+  <div class="card" id="gComment"></div>`;
   app.innerHTML = html; bindGo(app);
   // szachownica z zapisem
-  const host = $("#gBoard"); const bh = document.createElement("div"); host.appendChild(bh);
+  setTopH(); const host = $("#gBoard"); const bh = document.createElement("div"); host.appendChild(bh);
   const board = new Board(bh, { orient:g.color });
-  const ctrl = document.createElement("div"); ctrl.className = "lp"; ctrl.innerHTML = '<div class="ctrl"><button data-a="first">⏮</button><button data-a="prev">◀</button><button data-a="next">▶</button><button data-a="last">⏭</button></div>'; host.appendChild(ctrl);
+  const ctrl = document.createElement("div"); ctrl.className = "lp"; ctrl.innerHTML = '<div class="ctrl"><button data-a="first">⏮</button><button data-a="prev">◀</button><button data-a="next">▶</button><button data-a="last">⏭</button><button data-a="pin" class="pinb" aria-label="Przypnij planszę">📌</button></div>'; host.appendChild(ctrl);
   const chips = document.createElement("div"); chips.className = "chips gchips"; host.appendChild(chips);
   const fens = ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]; const gg = new Chess(); P.forEach(p => { gg.move(p.s, { sloppy:true }); fens.push(gg.fen()); });
   chips.innerHTML = P.map((p,i) => `<button class="chip" data-i="${i}">${i % 2 === 0 ? `<span class="n">${i/2+1}.</span>` : ""}${fmtSan(p.s)}${["brilliant","great","inaccuracy","mistake","miss","blunder"].includes(p.k) ? clsBadge(p.k) : ""}</button>`).join("");
   let idx = -1;
   function show(i){
     idx = Math.max(-1, Math.min(P.length - 1, i)); const p = P[idx];
-    board.set(fens[idx+1], { last: p ? { f:p.f, t:p.t } : null, marks: p && ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? [{ sq:p.t, c:hexA(CLS[p.k].c, .95) }] : [] });
+    const arrows = [];
+    if (p && ["inaccuracy","mistake","miss","blunder"].includes(p.k)) {
+      const arr = (f, san, c) => { if (!san) return; const m = new Chess(f).move(san, { sloppy:true }); if (m) arrows.push({ f:m.from, t:m.to, c }); };
+      if (p.c === g.color || ["mistake","miss","blunder"].includes(p.k)) { arr(fens[idx], p.bp && p.bp[0], "rgba(47,125,79,.85)"); if (p.c === g.color) arr(fens[idx+1], p.rp && p.rp[0], "rgba(200,60,40,.85)"); }
+    }
+    board.set(fens[idx+1], { arrows, last: p ? { f:p.f, t:p.t } : null, marks: p && ["inaccuracy","mistake","miss","blunder","brilliant","great"].includes(p.k) ? [{ sq:p.t, c:hexA(CLS[p.k].c, .95) }] : [] });
     chips.querySelectorAll(".chip").forEach((c,j) => c.classList.toggle("on", j === idx));
-    const on = chips.querySelector(".chip.on"); if (on && on.scrollIntoView) on.scrollIntoView({ block:"nearest", inline:"nearest" });
+    const on = chips.querySelector(".chip.on"); if (on) chips.scrollLeft = on.offsetLeft - chips.clientWidth / 2 + on.offsetWidth / 2; else chips.scrollLeft = 0;
     const cur = document.getElementById("egCur"); if (cur) cur.setAttribute("x", idx < 0 ? 0 : ((idx + 0.5) / P.length * 600 - 1).toFixed(1));
     renderComment(p, idx);
+    // komentarz zaczyna się tuż pod przypiętą planszą
+    if (host.classList.contains("on") && host.getBoundingClientRect().top <= parseFloat(getComputedStyle(host).top) + 1) { const C = $("#gComment"); const top = C.getBoundingClientRect().top, bot = host.getBoundingClientRect().bottom; if (top < bot - 2 || top > window.innerHeight - 80) window.scrollBy(0, top - bot - 8); }
   }
   function renderComment(p, i){
     const C = $("#gComment");
@@ -1479,6 +1486,7 @@ function viewGame(id){
     else if (mine && ["inaccuracy","mistake","miss","blunder"].includes(p.k)) h += `<p class="small muted">Brak szczegółowego komentarza dla tego ruchu.</p>`;
     else if (!mine && ["mistake","miss","blunder"].includes(p.k) && p.bp && p.bp.length) h += "<p>" + rich("Przeciwnik się pomylił. Lepiej było [[" + p.bp[0] + "]]. Sprawdź w następnym ruchu, czy to wykorzystałeś.") + "</p>";
     else if (["best","great","brilliant"].includes(p.k)) h += `<p style="margin:0">${p.k === "brilliant" ? "Genialny ruch: najlepszy, jedyny dobry i z ofiarą materiału." : p.k === "great" ? "Wspaniały ruch: jedyny, który utrzymywał przewagę lub równowagę." : "Ruch zgodny z pierwszym wyborem silnika."}</p>`;
+    if (["inaccuracy","mistake","miss","blunder"].includes(p.k) && (mine || ["mistake","miss","blunder"].includes(p.k))) h += `<p class="small muted" style="margin:8px 0 0"><span style="color:#2f7d4f;font-weight:800">━➤</span> lepszy ruch${mine ? ` &nbsp; <span style="color:#c83c28;font-weight:800">━➤</span> odpowiedź przeciwnika` : ""} (strzałki na planszy)</p>`;
     C.innerHTML = `<div class="kicker">Komentarz</div>` + h;
     if (p.x && mine) {
       const L = $("#cmLines");
@@ -1488,13 +1496,15 @@ function viewGame(id){
       });
     }
   }
-  ctrl.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; const act = b.dataset.a; show(act === "first" ? -1 : act === "prev" ? idx - 1 : act === "next" ? idx + 1 : P.length - 1); });
+  ctrl.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; const act = b.dataset.a; if (act === "pin") { S.settings.pin = S.settings.pin === false; save(); host.classList.toggle("on", S.settings.pin !== false); toast(S.settings.pin !== false ? "Plansza przypięta: zostaje widoczna podczas czytania" : "Plansza odpięta"); return; } show(act === "first" ? -1 : act === "prev" ? idx - 1 : act === "next" ? idx + 1 : P.length - 1); });
   chips.addEventListener("click", e => { const c = e.target.closest(".chip"); if (c) show(+c.dataset.i); });
   app.querySelectorAll("[data-ply]").forEach(el => el.addEventListener("click", () => { show(+el.dataset.ply); $("#gBoard").scrollIntoView({ behavior:"smooth", block:"start" }); }));
   const eg = app.querySelector(".egraph"); if (eg) eg.addEventListener("click", e => { if (e.target.dataset && e.target.dataset.ply) return; const r = eg.getBoundingClientRect(); show(Math.floor((e.clientX - r.left) / r.width * P.length)); });
   let firstErr = P.findIndex(p => p.c === g.color && ["mistake","miss","blunder"].includes(p.k)); if (firstErr < 0) firstErr = P.findIndex(p => p.c === g.color && p.k === "inaccuracy");
   show(firstErr >= 0 ? firstErr : -1);
 }
+function setTopH(){ const t = document.querySelector(".top"); if (t) document.documentElement.style.setProperty("--toph", t.offsetHeight + "px"); }
+window.addEventListener("resize", setTopH); setTimeout(setTopH, 0);
 function hexA(hex, a){ const n = parseInt(hex.slice(1), 16); return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")"; }
 
 /* ---------------- automatyczna aktualizacja (GitHub Pages) ---------------- */
