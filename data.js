@@ -389,11 +389,11 @@ window.DATA = {
         "W Sycylijskiej otwartej (2.Nf3) grasz świetnie: 21–0–12. W bocznych wariantach masz tylko 13–3–27, choć po 10 ruchach pozycja jest zwykle równa. Przegrywasz później, bo nie znasz typowych planów."
       ],
       steps: [
-        { t: "Zasada 3 pytań w otwarciu", d: "Przed każdym ruchem: (1) Które pola atakują piony przeciwnika? (2) Czy rozwijam nową figurę? (3) Czy król będzie bezpieczny do 10. ruchu? Hetman wychodzi dopiero po roszadzie." },
-        { t: "Gambit Przyjęty: rozwój zamiast pogoni za pionem", d: "Graj Nf3, e3, Bxc4, O-O. Pion c4 wraca sam. Przećwicz wariant w zakładce Repertuar." },
-        { t: "Nowe otwarcie białymi: System Londyński przeciw 1...Nf6", d: "Po 1.d4 Nf6 grasz 2.Bf4 i stały układ: e3, Nf3, c3, Nbd2, Bd3, h3. Przeciw 1...d5 zostajesz przy 2.c4." },
-        { t: "Nowe otwarcie czarnymi: Obrona Słowiańska przeciw 1.d4", d: "1...d5 i 2...c6, a goniec c8 wychodzi na f5 przed ruchem e6. Jeden system przeciw 2.c4, Systemowi Londyńskiemu i 2.e3." },
-        { t: "Jeden prosty układ na każdy boczny wariant Sycylijskiej", d: "2.c3 d5, 2.Bc4 e6 i d5, 2.f4 d5, 2.Nc3 Nc6 i g6. Zrób po jednym przejściu każdej linii dziennie przez tydzień." }
+        { metric: "bph.open", ex: ["o1","o4","o6"], t: "Zasada 3 pytań w otwarciu", d: "Przed każdym ruchem: (1) Które pola atakują piony przeciwnika? (2) Czy rozwijam nową figurę? (3) Czy król będzie bezpieczny do 10. ruchu? Hetman wychodzi dopiero po roszadzie." },
+        { metric: "open.qga", ex: ["o1","o2"], t: "Gambit Przyjęty: rozwój zamiast pogoni za pionem", d: "Graj Nf3, e3, Bxc4, O-O. Pion c4 wraca sam. Przećwicz wariant w zakładce Repertuar." },
+        { metric: "open.london", ex: [], t: "Nowe otwarcie białymi: System Londyński przeciw 1...Nf6", d: "Po 1.d4 Nf6 grasz 2.Bf4 i stały układ: e3, Nf3, c3, Nbd2, Bd3, h3. Przeciw 1...d5 zostajesz przy 2.c4." },
+        { metric: "open.blackVsD4", ex: [], t: "Nowe otwarcie czarnymi: Obrona Słowiańska przeciw 1.d4", d: "1...d5 i 2...c6, a goniec c8 wychodzi na f5 przed ruchem e6. Jeden system przeciw 2.c4, Systemowi Londyńskiemu i 2.e3." },
+        { metric: "open.sicAnti", ex: ["o6"], t: "Jeden prosty układ na każdy boczny wariant Sycylijskiej", d: "2.c3 d5, 2.Bc4 e6 i d5, 2.f4 d5, 2.Nc3 Nc6 i g6. Zrób po jednym przejściu każdej linii dziennie przez tydzień." }
       ]
     },
     mid: {
@@ -405,11 +405,11 @@ window.DATA = {
         "Twój styl jest aktywny i taktyczny: 27 ze 114 wygranych to maty. Lubisz atak i aktywne figury, ale za rzadko sprawdzasz odpowiedź przeciwnika."
       ],
       steps: [
-        { t: "Kontrola przed każdym ruchem (10 sekund)", d: "Po ruchu przeciwnika zapytaj: co on teraz atakuje? Przed swoim ruchem: czy po nim coś mi wisi? Jakie szachy i bicia ma przeciwnik?" },
-        { t: "Wykorzystaj czas", d: "Celuj w zużycie 7–8 minut z 10. W ważnych momentach (bicia, szachy, wymiany) zatrzymaj się na 20–30 sekund." },
-        { t: "Pytanie o obrońcę", d: "Zanim ruszysz figurą albo nią zbijesz: czego ona broniła? Co zasłaniała? To błędy z ćwiczeń m2, m5, m8." },
-        { t: "Codziennie 10 minut taktyki tematycznej", d: "W kolejności: widły, związania, usunięcie obrońcy, ruch pośredni, groźby mata. Najpierw zrób ćwiczenia z tej zakładki, potem zadania z tymi motywami na chess.com." },
-        { t: "Po każdej przegranej: jeden ruch", d: "Znajdź moment, w którym ocena spadła najbardziej, i opisz w jednym zdaniu, czego nie sprawdziłeś." }
+        { metric: "bph.mid", ex: ["m1","m4","m9"], t: "Kontrola przed każdym ruchem (10 sekund)", d: "Po ruchu przeciwnika zapytaj: co on teraz atakuje? Przed swoim ruchem: czy po nim coś mi wisi? Jakie szachy i bicia ma przeciwnik?" },
+        { metric: "used", ex: [], t: "Wykorzystaj czas", d: "Celuj w zużycie 7–8 minut z 10. W ważnych momentach (bicia, szachy, wymiany) zatrzymaj się na 20–30 sekund." },
+        { metric: "bph.mid", ex: ["m2","m5","m8"], t: "Pytanie o obrońcę", d: "Zanim ruszysz figurą albo nią zbijesz: czego ona broniła? Co zasłaniała? To błędy z ćwiczeń m2, m5, m8." },
+        { metric: "bpg", ex: ["o3","m3","m6","m7","m9"], t: "Codziennie 10 minut taktyki tematycznej", d: "W kolejności: widły, związania, usunięcie obrońcy, ruch pośredni, groźby mata. Najpierw zrób ćwiczenia z tej zakładki, potem zadania z tymi motywami na chess.com." },
+        { metric: "winPct", ex: [], t: "Po każdej przegranej: jeden ruch", d: "Znajdź moment, w którym ocena spadła najbardziej, i opisz w jednym zdaniu, czego nie sprawdziłeś." }
       ]
     },
     end: {
@@ -419,10 +419,10 @@ window.DATA = {
         "Król w końcówce bywa u Ciebie bierny albo stoi na złej linii (związanie własnej figury, matowa sieć na skraju planszy)."
       ],
       steps: [
-        { t: "Z przewagą: najpierw bezpieczeństwo", d: "Gdy masz więcej materiału, zadaj pytanie: czy mój król i moje figury są bezpieczne? Wymieniaj hetmany i figury, a nie zbieraj pionów." },
-        { t: "Wolny pion to plan", d: "Wolnego piona wspieraj i pchaj. Nie odsuwaj figur, które go chronią (ćwiczenie e7)." },
-        { t: "Aktywny król, ale nie na linii wieży", d: "Król idzie do centrum, ale nie staje na jednej linii z wieżą przeciwnika, jeśli między wami stoi Twoja figura (ćwiczenie e6)." },
-        { t: "Podstawowe końcówki", d: "Opanuj: opozycję w końcówce król i pion przeciw królowi, pozycję Philidora i Lucenę w końcówkach wieżowych. Na chess.com znajdziesz je w lekcjach o końcówkach." }
+        { metric: "bph.end", ex: ["e1","e2","e3","e5"], t: "Z przewagą: najpierw bezpieczeństwo", d: "Gdy masz więcej materiału, zadaj pytanie: czy mój król i moje figury są bezpieczne? Wymieniaj hetmany i figury, a nie zbieraj pionów." },
+        { metric: "bph.end", ex: ["e4","e7"], t: "Wolny pion to plan", d: "Wolnego piona wspieraj i pchaj. Nie odsuwaj figur, które go chronią (ćwiczenie e7)." },
+        { metric: "bph.end", ex: ["e6"], t: "Aktywny król, ale nie na linii wieży", d: "Król idzie do centrum, ale nie staje na jednej linii z wieżą przeciwnika, jeśli między wami stoi Twoja figura (ćwiczenie e6)." },
+        { metric: "bph.end", ex: [], t: "Podstawowe końcówki", d: "Opanuj: opozycję w końcówce król i pion przeciw królowi, pozycję Philidora i Lucenę w końcówkach wieżowych. Na chess.com znajdziesz je w lekcjach o końcówkach." }
       ],
       rules: [
         "Wieża za wolnym pionem: swoim i przeciwnika.",

@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261119184920";
+const APP_VERSION = "20261120083439";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -344,9 +344,62 @@ function route(){
 }
 
 /* ---------------- views: start ---------------- */
+/* ---------------- wdrażanie planu: mierniki ---------------- */
+const METRICS = {
+  "bph.open": { l:"Poważne błędy w otwarciu (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
+  "bph.mid":  { l:"Poważne błędy w grze środkowej (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
+  "bph.end":  { l:"Poważne błędy w końcówce (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
+  "bpg":      { l:"Poważne błędy łącznie (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
+  "used":     { l:"Zużyty czas w partii (mediana)", better:"up", f:x => Math.floor(x/60) + ":" + String(Math.round(x%60)).padStart(2,"0") },
+  "winPct":   { l:"Wygrane partie", better:"up", f:x => Math.round(x) + "%" },
+  "open.qga": { l:"Wynik w Gambicie Przyjętym", better:"up", f:x => Math.round(x) + "%", open:"qga" },
+  "open.london": { l:"Wynik w Systemie Londyńskim", better:"up", f:x => Math.round(x) + "%", open:"london" },
+  "open.blackVsD4": { l:"Wynik czarnymi przeciw 1.d4", better:"up", f:x => Math.round(x) + "%", open:"blackVsD4" },
+  "open.sicAnti": { l:"Wynik w bocznych wariantach Sycylijskiej", better:"up", f:x => Math.round(x) + "%", open:"sicAnti" }
+};
+function stepState(ph, i){ const v = (S.plan[ph] || {})[i]; if (!v) return null; if (v === true) return { on:true, ts:null }; return v; }
+function baselineAgg(){ const B = D.baseline; const o = {}; Object.keys(B.openings).forEach(k => o[k] = B.openings[k]); return { n:B.games, winPct:B.winPct, used:B.medianTimeUsed, bpg:B.blundersPerGame, bph:B.blundersByPhase, open:o, engN:B.analysed, label:"analiza z " + fmtDate(D.analysisDate) }; }
+function aggSnaps(list){
+  if (!list.length) return null;
+  const a = { n:0, winW:0, usedW:0, usedN:0, engN:0, bpg:0, bph:{ open:0, mid:0, end:0 }, open:{} };
+  list.forEach(s => { a.n += s.n; a.winW += s.winPct * s.n; if (s.used != null) { a.usedW += s.used * s.n; a.usedN += s.n; }
+    if (s.bpg != null) { a.engN += s.n; a.bpg += s.bpg * s.n; ["open","mid","end"].forEach(k => a.bph[k] += s.bph[k] * s.n); }
+    Object.entries(s.open || {}).forEach(([k,v]) => { a.open[k] = a.open[k] || { w:0, d:0, l:0 }; a.open[k].w += v.w; a.open[k].d += v.d; a.open[k].l += v.l; }); });
+  return { n:a.n, winPct: a.winW / a.n, used: a.usedN ? a.usedW / a.usedN : null, bpg: a.engN ? a.bpg / a.engN : null, bph: a.engN ? { open:a.bph.open/a.engN, mid:a.bph.mid/a.engN, end:a.bph.end/a.engN } : null, open:a.open, engN:a.engN };
+}
+function metricVal(agg, key){
+  if (!agg) return null; const m = METRICS[key];
+  if (m.open) { const o = agg.open && agg.open[m.open]; const n = o ? o.w + o.d + o.l : 0; return n ? { v:(o.w + o.d/2) / n * 100, n } : null; }
+  if (key.startsWith("bph.")) return agg.bph ? { v:agg.bph[key.slice(4)], n:agg.engN } : null;
+  if (key === "bpg") return agg.bpg != null ? { v:agg.bpg, n:agg.engN } : null;
+  if (key === "used") return agg.used != null ? { v:agg.used, n:agg.n } : null;
+  if (key === "winPct") return { v:agg.winPct, n:agg.n };
+  return null;
+}
+function stepMetric(ph, i){
+  const step = D.plan[ph].steps[i]; const st = stepState(ph, i); if (!st || !step.metric) return null;
+  const snaps = S.imported.snaps || []; const ts = st.ts || 0;
+  const beforeSnaps = snaps.filter(x => x.ts < ts); const afterSnaps = snaps.filter(x => x.ts >= ts);
+  const before = beforeSnaps.length ? aggSnaps(beforeSnaps.slice(-1)) : baselineAgg();
+  const after = aggSnaps(afterSnaps);
+  const m = METRICS[step.metric]; const b = metricVal(before, step.metric), a = metricVal(after, step.metric);
+  let verdict = null;
+  if (b && a) { const d = a.v - b.v; const good = m.better === "up" ? d > 0 : d < 0; verdict = Math.abs(d) < 1e-9 ? "bez zmian" : (good ? "poprawa" : "pogorszenie"); }
+  return { m, b, a, verdict, since: st.ts, afterGames: after ? after.n : 0 };
+}
+function stepMetricHtml(ph, i){
+  const r = stepMetric(ph, i); if (!r) return "";
+  const col = r.verdict === "poprawa" ? "var(--ok)" : r.verdict === "pogorszenie" ? "var(--bad)" : "var(--muted)";
+  const arrow = r.verdict === "poprawa" ? "▲" : r.verdict === "pogorszenie" ? "▼" : "";
+  return `<div class="stepm"><div class="small muted">Wdrażasz${r.since ? " od " + new Date(r.since).toLocaleDateString("pl-PL") : ""} · miernik: ${esc(r.m.l)}</div>
+    <div class="stepm-row"><span>przed: <b>${r.b ? r.m.f(r.b.v) : "brak danych"}</b></span><span>→</span><span>po: <b>${r.a ? r.m.f(r.a.v) : "–"}</b></span>${r.verdict ? `<span style="color:${col};font-weight:800">${arrow} ${r.verdict}</span>` : ""}</div>
+    <div class="small muted">${r.a ? "na podstawie " + plural(r.a.n, "partii", "partii", "partii") + " zagranych po zaznaczeniu" + (r.a.n < 10 ? " (mało danych, traktuj orientacyjnie)" : "") : "Zagraj kilka partii i naciśnij „Odśwież moje gry” w Postępach, wtedy pojawi się wynik „po”."}</div></div>`;
+}
+function activeStepExercises(){ const set = new Set(); ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((s,i) => { if (stepState(ph,i)) (s.ex || []).forEach(id => set.add(id)); })); return set; }
 function nextExercises(n){
   const all = activeExercises();
-  const score = e => ({ new:0, fail:1, fix:2, ok:3 })[exStatus(e.id)];
+  const boost = activeStepExercises();
+  const score = e => ({ new:0, fail:1, fix:2, ok:3 })[exStatus(e.id)] - (boost.has(e.id) ? 1.5 : 0);
   return all.slice().sort((a,b) => score(a) - score(b) || (S.ex[a.id]?.ts||0) - (S.ex[b.id]?.ts||0)).slice(0,n);
 }
 function viewStart(){
@@ -428,7 +481,8 @@ function viewPhase(ph, sub){
   <div class="card">
     <div class="kicker">Plan poprawy</div>
     <h2>Co robimy</h2>
-    <ol class="steps">${P.steps.map((s,i) => `<li><b>${esc(s.t)}</b><span class="small">${rich(s.d)}</span><div style="margin-top:6px"><label style="display:inline-flex;gap:8px;align-items:center;font-size:14px;cursor:pointer;min-height:36px"><input type="checkbox" data-st="${i}" ${doneSteps[i]?"checked":""} style="width:20px;height:20px"> wdrażam to</label></div></li>`).join("")}</ol>
+    <ol class="steps">${P.steps.map((s,i) => `<li><b>${esc(s.t)}</b><span class="small">${rich(s.d)}</span><div style="margin-top:6px"><label style="display:inline-flex;gap:8px;align-items:center;font-size:14px;cursor:pointer;min-height:36px"><input type="checkbox" data-st="${i}" ${stepState(ph,i)?"checked":""} style="width:20px;height:20px"> wdrażam to</label>${stepMetricHtml(ph, i)}</div></li>`).join("")}</ol>
+    <p class="small muted" style="margin:6px 0 0">Po zaznaczeniu aplikacja zapamiętuje datę i porównuje miernik punktu przed i po. Ćwiczenia z tego tematu częściej trafiają do treningu na dziś, a wszystko jest też w raporcie postępów.</p>
   </div>
   <div class="card">
     <div class="kicker">Ćwiczenia z Twoich partii</div>
@@ -438,7 +492,7 @@ function viewPhase(ph, sub){
   </div>
   ${P.rules ? `<div class="card"><div class="kicker">Zasady</div><h2>Złote zasady końcówek</h2><ul class="clean">${P.rules.map(r=>"<li>"+rich(r)+"</li>").join("")}</ul></div>` : ""}`;
   const l = $("#exl"); exs.forEach(e => l.appendChild(exItem(e)));
-  app.querySelectorAll("[data-st]").forEach(c => c.addEventListener("change", () => { S.plan[ph] = S.plan[ph] || {}; S.plan[ph][c.dataset.st] = c.checked; save(); }));
+  app.querySelectorAll("[data-st]").forEach(c => c.addEventListener("change", () => { S.plan[ph] = S.plan[ph] || {}; if (c.checked) S.plan[ph][c.dataset.st] = { on:true, ts:Date.now() }; else delete S.plan[ph][c.dataset.st]; save(); viewPhase(ph, ph === "open" ? "plan" : undefined); }));
   bindGo(app);
 }
 /* ---------------- grafika: ocena, wyniki, plany, mapa ---------------- */
@@ -807,6 +861,7 @@ function viewProgress(){
     ${L ? `<p class="small muted" style="margin-bottom:0">Ostatnia aktualizacja: ${new Date(L.ts).toLocaleString("pl-PL")} · ${L.n} nowych partii</p>` : ""}
   </div>
   ${L ? compareCard(L, P) : ""}
+  ${implCard()}
   <div class="card chart"><div class="kicker">Rating rapid</div><h2>${L && L.rating ? L.rating : B.ratingNow}</h2>${ratingChart()}</div>
   <div class="card">
     <div class="kicker">Ćwiczenia</div><h2>Twoje rozwiązania</h2>
@@ -824,6 +879,10 @@ function viewProgress(){
   $("#refB").addEventListener("click", openRefresh);
   $("#copyB").addEventListener("click", () => { const t = reportText(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Raport skopiowany"), () => { const ta = document.createElement("textarea"); ta.value = t; $("#aiOut").appendChild(ta); ta.select(); toast("Zaznacz i skopiuj tekst"); }); });
   setupAI();
+}
+function implCard(){
+  const rows = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { if (stepState(ph,i)) rows.push(`<div style="border-top:1px solid var(--line);padding:10px 0"><b>${esc(st.t)}</b> <span class="pill">${PH[ph]}</span>${stepMetricHtml(ph,i)}</div>`); }));
+  return `<div class="card"><div class="kicker">Plan poprawy</div><h2>Co wdrażasz i czy działa</h2>${rows.length ? rows.join("") : '<p class="small muted" style="margin:0">Nie zaznaczyłeś jeszcze żadnego punktu. Zrób to w zakładkach Otwarcia (Plan i ćwiczenia), Środek i Końcówka, przy „wdrażam to”.</p>'}</div>`;
 }
 function compareCard(L, P){
   const B = D.baseline; const ref = P || { winPct:B.winPct, bpg:B.blundersPerGame, bph:B.blundersByPhase, used:B.medianTimeUsed, open:{ qga:B.openings.qga, sicAnti:B.openings.sicAnti, blackVsD4:B.openings.blackVsD4 }, rating:B.ratingNow, label:"analiza z " + fmtDate(D.analysisDate) };
@@ -867,6 +926,8 @@ function reportText(){
   const fails = allExercises().filter(e => ["fail","fix"].includes(exStatus(e.id))).map(e => e.id + " (" + e.theme + ")"); if (fails.length) t += "Sprawiły trudność: " + fails.join(", ") + "\n";
   const mis = allExercises().filter(e => isMis(e.id)).map(e => e.id + " (" + e.my + ")"); const fl = Object.entries(S.flags||{}).map(([id,f]) => { const x = exById(id); return id + (x ? " [" + x.fen + ", zagrano " + x.my + ", najlepszy wg aplikacji " + x.best[0] + "]" : "") + (f.note ? " – uwaga: " + f.note : ""); }); if (fl.length) t += "ZGŁOSZONE BŁĘDY W WYJAŚNIENIACH:\n" + fl.join("\n") + "\n";
   if (mis.length) t += "Oznaczone jako misclick (nie liczyć jako błąd w myśleniu): " + mis.join(", ") + "\n";
+  const impl = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { const r = stepMetric(ph, i); if (!stepState(ph,i)) return; impl.push(PH[ph] + ": " + st.t + (r ? " (od " + (r.since ? new Date(r.since).toLocaleDateString("pl-PL") : "?") + "; " + r.m.l + ": przed " + (r.b ? r.m.f(r.b.v) : "brak") + ", po " + (r.a ? r.m.f(r.a.v) + " z " + r.a.n + " partii" : "brak danych") + (r.verdict ? ", " + r.verdict : "") + ")" : "")); }));
+  if (impl.length) t += "WDRAŻANE PUNKTY PLANU:\n" + impl.join("\n") + "\n";
   t += "Notacja: " + D.notation.filter(l => S.nota[l.id]).length + "/" + D.notation.length + " lekcji.\n";
   const nx = (S.imported.exercises || []).map(e => e.id + " " + e.fen + " zagrano " + e.my + ", lepiej " + e.best[0]); if (nx.length) t += "Nowe pozycje z błędami:\n" + nx.join("\n") + "\n";
   return t;
