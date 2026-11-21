@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261120182209";
+const APP_VERSION = "20261121075309";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -357,57 +357,106 @@ function route(){
 
 /* ---------------- views: start ---------------- */
 /* ---------------- wdrażanie planu: mierniki ---------------- */
-const METRICS = {
-  "bph.open": { l:"Poważne błędy w otwarciu (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
-  "bph.mid":  { l:"Poważne błędy w grze środkowej (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
-  "bph.end":  { l:"Poważne błędy w końcówce (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
-  "bpg":      { l:"Poważne błędy łącznie (na partię)", better:"down", f:x => String(x.toFixed(2)).replace(".", ",") },
-  "used":     { l:"Zużyty czas w partii (mediana)", better:"up", f:x => Math.floor(x/60) + ":" + String(Math.round(x%60)).padStart(2,"0") },
-  "winPct":   { l:"Wygrane partie", better:"up", f:x => Math.round(x) + "%" },
-  "open.qga": { l:"Wynik w Gambicie Przyjętym", better:"up", f:x => Math.round(x) + "%", open:"qga" },
-  "open.london": { l:"Wynik w Systemie Londyńskim", better:"up", f:x => Math.round(x) + "%", open:"london" },
-  "open.blackVsD4": { l:"Wynik czarnymi przeciw 1.d4", better:"up", f:x => Math.round(x) + "%", open:"blackVsD4" },
-  "open.sicAnti": { l:"Wynik w bocznych wariantach Sycylijskiej", better:"up", f:x => Math.round(x) + "%", open:"sicAnti" }
+/* ---------------- plan poprawy: mierniki liczone automatycznie z nowych partii ---------------- */
+const f2 = x => x.toFixed(2).replace(".", ","), fPct = x => Math.round(x) + "%", fTime = x => Math.floor(x/60) + ":" + String(Math.round(x%60)).padStart(2,"0");
+const resPct = o => o && (o.w + o.d + o.l) ? (o.w + o.d/2) / (o.w + o.d + o.l) * 100 : null;
+const PM = {
+  "bph.open": { l:"Poważne błędy w otwarciu (na partię)", better:"down", f:f2, base:() => D.baseline.blundersByPhase.open, target:0.2, tgt:"0,20 lub mniej", eng:true },
+  "bph.mid":  { l:"Poważne błędy w grze środkowej (na partię)", better:"down", f:f2, base:() => D.baseline.blundersByPhase.mid, target:0.6, tgt:"0,60 lub mniej", eng:true },
+  "bph.end":  { l:"Poważne błędy w końcówce (na partię)", better:"down", f:f2, base:() => D.baseline.blundersByPhase.end, target:0.3, tgt:"0,30 lub mniej", eng:true },
+  "earlyQ":   { l:"Partie z ruchem hetmana przed roszadą (w pierwszych 8 ruchach)", better:"down", f:fPct, base:() => null, target:10, tgt:"10% lub mniej" },
+  "used":     { l:"Zużyty czas w partii (mediana)", better:"up", f:fTime, base:() => D.baseline.medianTimeUsed, target:420, tgt:"7:00–8:00" },
+  "qga.adh":  { l:"Gambit Przyjęty: e3 i Bxc4 w pierwszych 8 ruchach, bez Qa4/Qb3 przed roszadą", better:"up", f:fPct, base:() => null, target:80, tgt:"80% lub więcej" },
+  "open.qga": { l:"Wynik w Gambicie Przyjętym", better:"up", f:fPct, base:() => resPct(D.baseline.openings.qga), target:50, tgt:"50% lub więcej" },
+  "london.adh": { l:"Po 1.d4 Nf6 grasz 2.Bf4", better:"up", f:fPct, base:() => 0, target:80, tgt:"80% lub więcej" },
+  "open.london": { l:"Wynik po 1.d4 Nf6", better:"up", f:fPct, base:() => resPct(D.baseline.openings.d4nf6), target:50, tgt:"50% lub więcej" },
+  "slav.adh": { l:"Przeciw 1.d4 grasz 1...d5 i ...c6 w pierwszych 3 ruchach", better:"up", f:fPct, base:() => null, target:80, tgt:"80% lub więcej" },
+  "open.blackVsD4": { l:"Wynik czarnymi przeciw 1.d4, 1.c4 i 1.Nf3", better:"up", f:fPct, base:() => resPct(D.baseline.openings.blackVsD4), target:50, tgt:"50% lub więcej" },
+  "sic.adh":  { l:"W bocznej Sycylijskiej grasz przygotowaną odpowiedź na 2. ruch", better:"up", f:fPct, base:() => null, target:80, tgt:"80% lub więcej" },
+  "open.sicAnti": { l:"Wynik w bocznych wariantach Sycylijskiej", better:"up", f:fPct, base:() => resPct(D.baseline.openings.sicAnti), target:50, tgt:"50% lub więcej" },
+  "conv":     { l:"Partie wygrane po uzyskaniu przewagi +3 lub więcej", better:"up", f:fPct, base:() => null, target:80, tgt:"80% lub więcej", eng:true }
 };
-function stepState(ph, i){ const v = (S.plan[ph] || {})[i]; if (!v) return null; if (v === true) return { on:true, ts:null }; return v; }
-function baselineAgg(){ const B = D.baseline; const o = {}; Object.keys(B.openings).forEach(k => o[k] = B.openings[k]); return { n:B.games, winPct:B.winPct, used:B.medianTimeUsed, bpg:B.blundersPerGame, bph:B.blundersByPhase, open:o, engN:B.analysed, label:"analiza z " + fmtDate(D.analysisDate) }; }
-function aggSnaps(list){
-  if (!list.length) return null;
-  const a = { n:0, winW:0, usedW:0, usedN:0, engN:0, bpg:0, bph:{ open:0, mid:0, end:0 }, open:{} };
-  list.forEach(s => { a.n += s.n; a.winW += s.winPct * s.n; if (s.used != null) { a.usedW += s.used * s.n; a.usedN += s.n; }
-    if (s.bpg != null) { a.engN += s.n; a.bpg += s.bpg * s.n; ["open","mid","end"].forEach(k => a.bph[k] += s.bph[k] * s.n); }
-    Object.entries(s.open || {}).forEach(([k,v]) => { a.open[k] = a.open[k] || { w:0, d:0, l:0 }; a.open[k].w += v.w; a.open[k].d += v.d; a.open[k].l += v.l; }); });
-  return { n:a.n, winPct: a.winW / a.n, used: a.usedN ? a.usedW / a.usedN : null, bpg: a.engN ? a.bpg / a.engN : null, bph: a.engN ? { open:a.bph.open/a.engN, mid:a.bph.mid/a.engN, end:a.bph.end/a.engN } : null, open:a.open, engN:a.engN };
+// partie zagrane po analizie bazowej (rapid 10 min), bez podwójnego liczenia
+function postGames(){
+  const known = new Set(D.knownIds); const out = []; const seen = new Set();
+  let local = []; try { local = GAMES || gLoadLocal().map(expandGame); } catch(e) {}
+  local.forEach(g => { if (known.has(g.id) || seen.has(g.id) || g.date < D.analysisDate || (g.tc && g.tc !== 600)) return; seen.add(g.id); out.push({ id:g.id, color:g.color, res:g.res, toks:g.toks, clocks:g.clocks, tc:g.tc || 600, an:anGet(g.id) }); });
+  (S.imported.games || []).forEach(g => { if (known.has(g.id) || seen.has(g.id)) return; seen.add(g.id); out.push({ id:g.id, color:g.c, res:g.res, cat:g.cat, toks:null }); });
+  return out;
 }
-function metricVal(agg, key){
-  if (!agg) return null; const m = METRICS[key];
-  if (m.open) { const o = agg.open && agg.open[m.open]; const n = o ? o.w + o.d + o.l : 0; return n ? { v:(o.w + o.d/2) / n * 100, n } : null; }
-  if (key.startsWith("bph.")) return agg.bph ? { v:agg.bph[key.slice(4)], n:agg.engN } : null;
-  if (key === "bpg") return agg.bpg != null ? { v:agg.bpg, n:agg.engN } : null;
-  if (key === "used") return agg.used != null ? { v:agg.used, n:agg.n } : null;
-  if (key === "winPct") return { v:agg.winPct, n:agg.n };
-  return null;
+let PMCACHE = null;
+function planMetrics(){
+  if (PMCACHE && PMCACHE.t > Date.now() - 3000) return PMCACHE.v;
+  const G = postGames(); const v = {}; const rec = o => o.w + o.d + o.l;
+  const addRes = (o, g) => { o[g.res === "W" ? "w" : g.res === "D" ? "d" : "l"]++; };
+  const res = { qga:{w:0,d:0,l:0}, london:{w:0,d:0,l:0}, bvd4:{w:0,d:0,l:0}, sic:{w:0,d:0,l:0} };
+  const adh = { qga:[0,0], london:[0,0], slav:[0,0], sic:[0,0] }; let eq = [0,0]; const used = [];
+  const SICREP = { c3:"d5", Bc4:"e6", f4:"d5", Nc3:"Nc6" };
+  G.forEach(g => {
+    const t = g.toks; const cat = t ? category(t, g.color) : g.cat;
+    if (cat === "qga") addRes(res.qga, g);
+    if (cat === "slav" || cat === "blackVsD4") addRes(res.bvd4, g);
+    if (cat === "sicAnti") addRes(res.sic, g);
+    if (t ? (g.color === "w" && t[0] === "d4" && t[1] === "Nf6") : (cat === "d4nf6")) addRes(res.london, g);
+    if (!t) return;
+    const my = t.filter((x, k) => (k % 2 === 0) === (g.color === "w"));
+    if (cat === "qga") { adh.qga[1]++; const f8 = my.slice(0, 8); const cs = my.findIndex(x => /^O-O/.test(x)); const qb = my.findIndex(x => /^Q[ab][34]/.test(x)); if (f8.includes("e3") && f8.some(x => /^Bxc4/.test(x)) && !(qb >= 0 && (cs < 0 || qb < cs))) adh.qga[0]++; }
+    if (g.color === "w" && t[0] === "d4" && t[1] === "Nf6") { adh.london[1]++; if (t[2] === "Bf4") adh.london[0]++; }
+    if (g.color === "b" && t[0] === "d4") { adh.slav[1]++; if (t[1] === "d5" && my.slice(0, 3).includes("c6")) adh.slav[0]++; }
+    if (g.color === "b" && t[0] === "e4" && t[1] === "c5" && SICREP[t[2]]) { adh.sic[1]++; if (t[3] === SICREP[t[2]]) adh.sic[0]++; }
+    if (my.length >= 8) { eq[1]++; const cs = my.findIndex(x => /^O-O/.test(x)); const q = my.slice(0, 8).findIndex(x => /^Q/.test(x)); if (q >= 0 && (cs < 0 || q < cs)) eq[0]++; }
+    const mc = (g.clocks || []).filter((x, k) => (k % 2 === 0) === (g.color === "w")); if (mc.length > 10) used.push((g.tc || 600) - mc[mc.length - 1]);
+  });
+  // mierniki z analizy silnikiem (ta sama definicja poważnego błędu co w analizie bazowej: spadek o 3 piony lub więcej)
+  const AN = G.filter(g => g.an && g.toks); const bph = { open:0, mid:0, end:0 }; let convN = 0, convW = 0;
+  AN.forEach(g => {
+    const P = g.an.plies; const ch = new Chess(); const W = cp => Math.max(-1500, Math.min(1500, g.color === "w" ? cp : -cp)); let adv = false;
+    P.forEach((q, k) => {
+      const fen = ch.fen(); ch.move(q.s, { sloppy:true });
+      if (q.c !== g.color) return;
+      const before = W(q.b), after = W(q.w); if (k >= 20 && after >= 300) adv = true;
+      if ((before > 700 && after > 500) || (before < -700 && after < -700)) return;
+      if (before - after < 300) return;
+      const pcs = (fen.split(" ")[0].match(/[nbrqNBRQ]/g) || []).length;
+      bph[k + 1 <= 24 ? "open" : (pcs <= 6 ? "end" : "mid")]++;
+    });
+    if (adv) { convN++; if (g.res === "W") convW++; }
+  });
+  const pct = a => a[1] ? { v:a[0] / a[1] * 100, n:a[1] } : null;
+  ["open","mid","end"].forEach(k => v["bph." + k] = AN.length ? { v:bph[k] / AN.length, n:AN.length } : null);
+  v["earlyQ"] = pct(eq);
+  used.sort((a, b) => a - b); v["used"] = used.length ? { v:used[Math.floor(used.length / 2)], n:used.length } : null;
+  v["qga.adh"] = pct(adh.qga); v["london.adh"] = pct(adh.london); v["slav.adh"] = pct(adh.slav); v["sic.adh"] = pct(adh.sic);
+  v["open.qga"] = rec(res.qga) ? { v:resPct(res.qga), n:rec(res.qga) } : null;
+  v["open.london"] = rec(res.london) ? { v:resPct(res.london), n:rec(res.london) } : null;
+  v["open.blackVsD4"] = rec(res.bvd4) ? { v:resPct(res.bvd4), n:rec(res.bvd4) } : null;
+  v["open.sicAnti"] = rec(res.sic) ? { v:resPct(res.sic), n:rec(res.sic) } : null;
+  v["conv"] = convN ? { v:convW / convN * 100, n:convN } : null;
+  v._games = G.length; v._an = AN.length; v._pending = G.filter(g => g.toks && !g.an).length;
+  PMCACHE = { t:Date.now(), v }; return v;
 }
-function stepMetric(ph, i){
-  const step = D.plan[ph].steps[i]; const st = stepState(ph, i); if (!st || !step.metric) return null;
-  const snaps = S.imported.snaps || []; const ts = st.ts || 0;
-  const beforeSnaps = snaps.filter(x => x.ts < ts); const afterSnaps = snaps.filter(x => x.ts >= ts);
-  const before = beforeSnaps.length ? aggSnaps(beforeSnaps.slice(-1)) : baselineAgg();
-  const after = aggSnaps(afterSnaps);
-  const m = METRICS[step.metric]; const b = metricVal(before, step.metric), a = metricVal(after, step.metric);
-  let verdict = null;
-  if (b && a) { const d = a.v - b.v; const good = m.better === "up" ? d > 0 : d < 0; verdict = Math.abs(d) < 1e-9 ? "bez zmian" : (good ? "poprawa" : "pogorszenie"); }
-  return { m, b, a, verdict, since: st.ts, afterGames: after ? after.n : 0 };
+function metricEval(key){
+  const m = PM[key]; const a = planMetrics()[key]; const b = m.base();
+  let verdict = null, ok = null;
+  if (a) {
+    ok = key === "used" ? a.v >= 420 && a.v <= 480 : (m.better === "up" ? a.v >= m.target : a.v <= m.target);
+    if (b !== null && b !== undefined) { const d = a.v - b; verdict = Math.abs(d) < 1e-9 ? "bez zmian" : ((m.better === "up" ? d > 0 : d < 0) ? "poprawa" : "pogorszenie"); }
+  }
+  return { m, a, b, verdict, ok };
 }
 function stepMetricHtml(ph, i){
-  const r = stepMetric(ph, i); if (!r) return "";
-  const col = r.verdict === "poprawa" ? "var(--ok)" : r.verdict === "pogorszenie" ? "var(--bad)" : "var(--muted)";
-  const arrow = r.verdict === "poprawa" ? "▲" : r.verdict === "pogorszenie" ? "▼" : "";
-  return `<div class="stepm"><div class="small muted">Wdrażasz${r.since ? " od " + new Date(r.since).toLocaleDateString("pl-PL") : ""} · miernik: ${esc(r.m.l)}</div>
-    <div class="stepm-row"><span>przed: <b>${r.b ? r.m.f(r.b.v) : "brak danych"}</b></span><span>→</span><span>po: <b>${r.a ? r.m.f(r.a.v) : "–"}</b></span>${r.verdict ? `<span style="color:${col};font-weight:800">${arrow} ${r.verdict}</span>` : ""}</div>
-    <div class="small muted">${r.a ? "na podstawie " + plural(r.a.n, "partii", "partii", "partii") + " zagranych po zaznaczeniu" + (r.a.n < 10 ? " (mało danych, traktuj orientacyjnie)" : "") : "Zagraj kilka partii i naciśnij „Odśwież moje gry” w Postępach, wtedy pojawi się wynik „po”."}</div></div>`;
+  const step = D.plan[ph].steps[i]; const ks = step.metrics || []; if (!ks.length) return "";
+  const PMv = planMetrics();
+  return `<div class="stepm">${ks.map(k => { const r = metricEval(k);
+    const col = r.verdict === "poprawa" ? "var(--ok)" : r.verdict === "pogorszenie" ? "var(--bad)" : "var(--muted)";
+    const arrow = r.verdict === "poprawa" ? "▲" : r.verdict === "pogorszenie" ? "▼" : "";
+    const nTxt = r.a ? plural(r.a.n, "partia", "partie", "partii") + (r.a.n < 10 ? ", mało danych" : "") : (r.m.eng && PMv._pending ? "czeka na analizę silnikiem" : "brak partii z tą sytuacją");
+    return `<div class="stepm-it"><div class="small muted">${esc(r.m.l)}</div>
+      <div class="stepm-row"><span>przed: <b>${r.b !== null && r.b !== undefined ? r.m.f(r.b) : "–"}</b></span><span>→</span><span>teraz: <b>${r.a ? r.m.f(r.a.v) : "–"}</b></span>${r.verdict ? `<span style="color:${col};font-weight:800">${arrow} ${r.verdict}</span>` : ""}</div>
+      <div class="small muted">cel: ${esc(r.m.tgt)}${r.a ? (r.ok ? ' · <b style="color:var(--ok)">✓ cel osiągnięty</b>' : ' · <b style="color:var(--bad)">jeszcze nie</b>') : ""} · ${nTxt}</div></div>`; }).join("")}</div>`;
 }
-function activeStepExercises(){ const set = new Set(); ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((s,i) => { if (stepState(ph,i)) (s.ex || []).forEach(id => set.add(id)); })); return set; }
+// ćwiczenia z punktów, które jeszcze nie osiągnęły celu albo się pogorszyły, częściej trafiają do treningu
+function activeStepExercises(){ const set = new Set(); ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach(s => { if ((s.metrics || []).some(k => { const r = metricEval(k); return r.a && (!r.ok || r.verdict === "pogorszenie"); })) (s.ex || []).forEach(id => set.add(id)); })); return set; }
 function nextExercises(n){
   const all = activeExercises();
   const boost = activeStepExercises();
@@ -502,7 +551,6 @@ function viewPhase(ph, sub){
   if (ph === "open" && sub === "moje") return viewMyOpenings();
   if (ph === "open" && sub === "rep") { app.innerHTML = segBar("rep") + repCard(); bindGo(app); return; }
   const P = D.plan[ph]; const exs0 = allExercises().filter(e => e.ph === ph); const exs = exs0.filter(e => !isMis(e.id)).concat(exs0.filter(e => isMis(e.id)));
-  const doneSteps = S.plan[ph] || {};
   app.innerHTML = (ph === "open" ? segBar("plan") : "") + `
   <div class="card">
     <div class="kicker">Diagnoza z Twoich partii</div>
@@ -512,8 +560,8 @@ function viewPhase(ph, sub){
   <div class="card">
     <div class="kicker">Plan poprawy</div>
     <h2>Co robimy</h2>
-    <ol class="steps">${P.steps.map((s,i) => `<li><b>${esc(s.t)}</b><span class="small">${rich(s.d)}</span><div style="margin-top:6px"><label style="display:inline-flex;gap:8px;align-items:center;font-size:14px;cursor:pointer;min-height:36px"><input type="checkbox" data-st="${i}" ${stepState(ph,i)?"checked":""} style="width:20px;height:20px"> wdrażam to</label>${stepMetricHtml(ph, i)}</div></li>`).join("")}</ol>
-    <p class="small muted" style="margin:6px 0 0">Po zaznaczeniu aplikacja zapamiętuje datę i porównuje miernik punktu przed i po. Ćwiczenia z tego tematu częściej trafiają do treningu na dziś, a wszystko jest też w raporcie postępów.</p>
+    <ol class="steps">${P.steps.map((s,i) => `<li><b>${esc(s.t)}</b><span class="small">${rich(s.d)}</span>${stepMetricHtml(ph, i)}</li>`).join("")}</ol>
+    <p class="small muted" style="margin:6px 0 0">${planNote()}</p>
   </div>
   <div class="card">
     <div class="kicker">Ćwiczenia z Twoich partii</div>
@@ -523,7 +571,6 @@ function viewPhase(ph, sub){
   </div>
   ${P.rules ? `<div class="card"><div class="kicker">Zasady</div><h2>Złote zasady końcówek</h2><ul class="clean">${P.rules.map(r=>"<li>"+rich(r)+"</li>").join("")}</ul></div>` : ""}`;
   const l = $("#exl"); exs.forEach(e => l.appendChild(exItem(e)));
-  app.querySelectorAll("[data-st]").forEach(c => c.addEventListener("change", () => { S.plan[ph] = S.plan[ph] || {}; if (c.checked) S.plan[ph][c.dataset.st] = { on:true, ts:Date.now() }; else delete S.plan[ph][c.dataset.st]; save(); viewPhase(ph, ph === "open" ? "plan" : undefined); }));
   bindGo(app);
 }
 /* ---------------- grafika: ocena, wyniki, plany, mapa ---------------- */
@@ -911,9 +958,10 @@ function viewProgress(){
   $("#copyB").addEventListener("click", () => { const t = reportText(); (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Raport skopiowany"), () => { const ta = document.createElement("textarea"); ta.value = t; $("#aiOut").appendChild(ta); ta.select(); toast("Zaznacz i skopiuj tekst"); }); });
   setupAI();
 }
+function planNote(){ const v = planMetrics(); return "Każdy punkt sprawdzam automatycznie na podstawie partii rapid zagranych po analizie z " + fmtDate(D.analysisDate) + " (teraz: " + plural(v._games, "partia", "partie", "partii") + ", z silnikiem: " + v._an + (v._pending ? ", w kolejce do analizy: " + v._pending : "") + "). „Przed” to wynik z analizy bazowej. Ćwiczenia z punktów, które jeszcze nie osiągnęły celu, częściej trafiają do treningu na dziś."; }
 function implCard(){
-  const rows = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { if (stepState(ph,i)) rows.push(`<div style="border-top:1px solid var(--line);padding:10px 0"><b>${esc(st.t)}</b> <span class="pill">${PH[ph]}</span>${stepMetricHtml(ph,i)}</div>`); }));
-  return `<div class="card"><div class="kicker">Plan poprawy</div><h2>Co wdrażasz i czy działa</h2>${rows.length ? rows.join("") : '<p class="small muted" style="margin:0">Nie zaznaczyłeś jeszcze żadnego punktu. Zrób to w zakładkach Otwarcia (Plan i ćwiczenia), Środek i Końcówka, przy „wdrażam to”.</p>'}</div>`;
+  const rows = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => rows.push(`<div style="border-top:1px solid var(--line);padding:10px 0"><b>${esc(st.t)}</b> <span class="pill">${PH[ph]}</span>${stepMetricHtml(ph,i)}</div>`)));
+  return `<div class="card"><div class="kicker">Plan poprawy</div><h2>Czy plan działa</h2><p class="small muted" style="margin-top:0">${planNote()}</p>${rows.join("")}</div>`;
 }
 function compareCard(L, P){
   const B = D.baseline; const ref = P || { winPct:B.winPct, bpg:B.blundersPerGame, bph:B.blundersByPhase, used:B.medianTimeUsed, open:{ qga:B.openings.qga, sicAnti:B.openings.sicAnti, blackVsD4:B.openings.blackVsD4 }, rating:B.ratingNow, label:"analiza z " + fmtDate(D.analysisDate) };
@@ -957,8 +1005,8 @@ function reportText(){
   const fails = allExercises().filter(e => ["fail","fix"].includes(exStatus(e.id))).map(e => e.id + " (" + e.theme + ")"); if (fails.length) t += "Sprawiły trudność: " + fails.join(", ") + "\n";
   const mis = allExercises().filter(e => isMis(e.id)).map(e => e.id + " (" + e.my + ")"); const fl = Object.entries(S.flags||{}).map(([id,f]) => { const x = exById(id); return id + (x ? " [" + x.fen + ", zagrano " + x.my + ", najlepszy wg aplikacji " + x.best[0] + "]" : "") + (f.note ? " – uwaga: " + f.note : ""); }); if (fl.length) t += "ZGŁOSZONE BŁĘDY W WYJAŚNIENIACH:\n" + fl.join("\n") + "\n";
   if (mis.length) t += "Oznaczone jako misclick (nie liczyć jako błąd w myśleniu): " + mis.join(", ") + "\n";
-  const impl = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { const r = stepMetric(ph, i); if (!stepState(ph,i)) return; impl.push(PH[ph] + ": " + st.t + (r ? " (od " + (r.since ? new Date(r.since).toLocaleDateString("pl-PL") : "?") + "; " + r.m.l + ": przed " + (r.b ? r.m.f(r.b.v) : "brak") + ", po " + (r.a ? r.m.f(r.a.v) + " z " + r.a.n + " partii" : "brak danych") + (r.verdict ? ", " + r.verdict : "") + ")" : "")); }));
-  if (impl.length) t += "WDRAŻANE PUNKTY PLANU:\n" + impl.join("\n") + "\n";
+  const impl = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { (st.metrics || []).forEach(k => { const r = metricEval(k); impl.push(PH[ph] + ": " + st.t + " – " + r.m.l + ": przed " + (r.b != null ? r.m.f(r.b) : "–") + ", teraz " + (r.a ? r.m.f(r.a.v) + " z " + r.a.n + " partii" : "brak danych") + ", cel " + r.m.tgt); }); }));
+  if (impl.length) t += "PLAN POPRAWY (mierniki z nowych partii):\n" + impl.join("\n") + "\n";
   t += "Notacja: " + D.notation.filter(l => S.nota[l.id]).length + "/" + D.notation.length + " lekcji.\n";
   const nx = (S.imported.exercises || []).map(e => e.id + " " + e.fen + " zagrano " + e.my + ", lepiej " + e.best[0]); if (nx.length) t += "Nowe pozycje z błędami:\n" + nx.join("\n") + "\n";
   return t;
@@ -1226,13 +1274,13 @@ function gNotify(){ GSTATUS.listeners.forEach(f => { try { f(); } catch(e){} });
 function gLoadLocal(){ try { const r = localStorage.getItem(GKEY); return r ? JSON.parse(r) : []; } catch(e) { return []; } }
 function gSaveLocal(list){ try { localStorage.setItem(GKEY, JSON.stringify(list)); } catch(e) {} }
 function anGet(id){ try { const r = localStorage.getItem(AKEY + id); return r ? JSON.parse(r) : null; } catch(e) { return null; } }
-function anSet(id, a){ try { localStorage.setItem(AKEY + id, JSON.stringify(a)); return true; } catch(e) { return false; } }
+function anSet(id, a){ PMCACHE = null; try { localStorage.setItem(AKEY + id, JSON.stringify(a)); return true; } catch(e) { return false; } }
 function compactGame(g){ return { id:g.id, c:g.color, res:g.res, opp:g.opp, oe:g.oe, me:g.myElo, date:g.date, time:g.time || g.date, url:g.url, eco:g.eco || "", term:g.term || "", tc:g.tc || 600, m:g.toks.join(" "), k:(g.clocks || []).map(x => Math.round(x)).join(",") }; }
 function expandGame(c){ return { id:c.id, color:c.c, res:c.res, opp:c.opp, oe:c.oe, myElo:c.me, date:c.date, time:c.time, url:c.url, eco:c.eco, term:c.term, tc:c.tc, toks:c.m ? c.m.split(" ") : [], clocks:c.k ? c.k.split(",").map(Number) : [] }; }
 function addGames(list){
   const cur = gLoadLocal(); const ids = new Set(cur.map(x => x.id)); let added = 0;
   list.forEach(g => { if (g && g.mine && g.id && !ids.has(g.id) && g.toks && g.toks.length) { cur.push(compactGame(g)); ids.add(g.id); added++; } });
-  cur.sort((a,b) => a.time < b.time ? 1 : -1); gSaveLocal(cur); GAMES = cur.map(expandGame); return added;
+  cur.sort((a,b) => a.time < b.time ? 1 : -1); gSaveLocal(cur); PMCACHE = null; GAMES = cur.map(expandGame); return added;
 }
 async function gFetchAll(){
   if (GSTATUS.loading) return; GSTATUS.loading = true; GSTATUS.err = null; gNotify();
@@ -1247,7 +1295,7 @@ async function gFetchAll(){
   } catch(e) { GSTATUS.err = "Nie udało się połączyć z chess.com z tej strony."; }
   GSTATUS.loading = false; if (!GAMES) GAMES = gLoadLocal().map(expandGame); gQueueAuto(); gNotify(); refreshStart();
 }
-function gQueueAuto(){ (GAMES || []).filter(g => g.date >= ANALYSIS_FROM && !anGet(g.id)).forEach(g => gEnqueue(g.id)); }
+function gQueueAuto(){ const known = new Set(D.knownIds); (GAMES || []).filter(g => (g.date >= ANALYSIS_FROM || (!known.has(g.id) && g.date >= D.analysisDate && (g.tc || 600) === 600)) && !anGet(g.id)).forEach(g => gEnqueue(g.id)); }
 function gEnqueue(id){ if (GSTATUS.queue.includes(id) || GSTATUS.running === id || anGet(id)) return; GSTATUS.queue.push(id); gNotify(); gRun(); }
 async function gRun(){
   if (GSTATUS.running || !GSTATUS.queue.length) return;
