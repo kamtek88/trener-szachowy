@@ -1,7 +1,7 @@
 /* Trener szachowy – aplikacja (mobile-first). Wymaga chess.js 0.10.3 i data.js. */
 (function(){
 "use strict";
-const APP_VERSION = "20261121075309";
+const APP_VERSION = "20261121105500";
 const D = window.DATA;
 const $ = (s, el=document) => el.querySelector(s);
 const app = $("#app");
@@ -67,7 +67,7 @@ const PHTAB = { open:"otwarcie", mid:"srodek", end:"koncowka" };
 const PHBACK = { open:"otwarcie-plan", mid:"srodek", end:"koncowka" };
 const RES = { W:"wygrana", L:"przegrana", D:"remis" };
 function fmtDate(d){ const [y,m,dd] = d.split("-"); return dd + "." + m + "." + y; }
-function allExercises(){ return D.exercises.concat(S.imported.exercises || []); }
+function allExercises(){ const own = new Set(D.exercises.map(e => e.id)); return D.exercises.concat((S.imported.exercises || []).filter(e => !own.has(e.id))); }   // sprawdzona wersja w data.js zastępuje automatyczną o tym samym id
 function exById(id){ return allExercises().find(e => e.id === id); }
 function isMis(id){ return !!(S.mis && S.mis[id]); }
 function activeExercises(){ return allExercises().filter(e => !isMis(e.id)); }
@@ -1008,7 +1008,7 @@ function reportText(){
   const impl = []; ["open","mid","end"].forEach(ph => D.plan[ph].steps.forEach((st,i) => { (st.metrics || []).forEach(k => { const r = metricEval(k); impl.push(PH[ph] + ": " + st.t + " – " + r.m.l + ": przed " + (r.b != null ? r.m.f(r.b) : "–") + ", teraz " + (r.a ? r.m.f(r.a.v) + " z " + r.a.n + " partii" : "brak danych") + ", cel " + r.m.tgt); }); }));
   if (impl.length) t += "PLAN POPRAWY (mierniki z nowych partii):\n" + impl.join("\n") + "\n";
   t += "Notacja: " + D.notation.filter(l => S.nota[l.id]).length + "/" + D.notation.length + " lekcji.\n";
-  const nx = (S.imported.exercises || []).map(e => e.id + " " + e.fen + " zagrano " + e.my + ", lepiej " + e.best[0]); if (nx.length) t += "Nowe pozycje z błędami:\n" + nx.join("\n") + "\n";
+  const ownIds = new Set(D.exercises.map(e => e.id)); const nx = (S.imported.exercises || []).filter(e => !ownIds.has(e.id)).map(e => e.id + " " + e.fen + " zagrano " + e.my + ", lepiej " + e.best[0]); if (nx.length) t += "Nowe pozycje z błędami:\n" + nx.join("\n") + "\n";
   return t;
 }
 

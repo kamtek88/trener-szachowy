@@ -375,6 +375,23 @@ window.DATA = {
     whyBad: "[[Nf5]] zostawia piona e6 bez osłony. Skoczek d6 stał między wieżą b6 a Twoim pionem i go zasłaniał. Po odejściu skoczka [[Rxe6]] i Twój najsilniejszy atut znika. Przewaga spada z decydującej do niewielkiej.",
     whyGood: "[[e7]] wprowadza piona na przedostatnie pole i grozi promocją na e8. Czarne pilnują pola e8 gońcem h5, ale do akcji dołączają Twoje wieże: [[Rf8+]] wypycha króla, a [[Rd8]] dokłada nacisk na pole promocji. Silnik pokazuje, że w końcu pion i tak przejdzie albo czarne będą musiały oddać za niego figurę.",
     look: ["Wolny pion na 6. rzędzie jest często wart więcej niż figura. Wspieraj go i pchaj.", "Figura, która zasłania Twojego piona przed wieżą przeciwnika, ma ważne zadanie. Nie odsuwaj jej bez powodu.", "W końcówce pytaj: co przybliża mnie do nowego hetmana?"]
+  },
+  {
+    // Zastępuje automatyczne ćwiczenie o tym samym id (partia z 20.11.2026), postępy zostają.
+    verified: "Stockfish 16, głębokość 24–62, MultiPV 3/4/2, sprawdzone wszystkie obrony",
+    id: "n187628039422-77", ph: "end", c: "w", theme: "Związany obrońca",
+    fen: "8/1pb3kp/p3Q1p1/2p1pr2/8/PP2KN2/8/6R1 w - - 6 39",
+    hist: ["d4","Nc6","d5","Ne5","Bf4","d6","Bxe5","dxe5","c4","f6","Nf3","e6","e4","Bd6","Nc3","Nh6","h3","O-O","Bd3","a6","O-O","f5","Re1","f4","b3","Rf6","Rc1","c6","Ne2","exd5","cxd5","c5","Bc4","Rg6","a3","Bxh3","g3","Bg4","Nh4","Rg5","f3","Bxf3","Nxf3","Rxg3+","Nxg3","fxg3","Kg2","Qf6","Rh1","Qg6","Qe1","Ng4","Qxg3","Ne3+","Kf2","Qxe4","Rhg1","g6","Rc3","Nxc4","Rxc4","Qxd5","Qh4","Rf8","Qe4","Qd2+","Qe2","Qf4","Rxf4","Rxf4","Ke3","Rf5","Qc4+","Kg7","Qe6","Bc7"], last: { f: "d6", t: "c7" },
+    opp: "Edj-5", oe: 1468, me: 1497, date: "2026-11-20", url: "https://www.chess.com/game/live/187628039422", res: "W", mv: 39,
+    my: "Qd7+", eb: 9940, ea: 752,
+    task: "Masz hetmana, wieżę i skoczka przeciw wieży i gońcowi. Czarna wieża stoi na f5. Twój ruch.",
+    hint: "Kto broni wieży f5? Spójrz na linię g: co stoi między Twoją wieżą g1 a czarnym królem g7?",
+    best: ["Qxf5","Bd8","Nxe5","Bg5+","Rxg5"],
+    alt: [{ label: "Też prowadzi do mata: Nh4 (skoczek atakuje wieżę f5 i piona g6)", moves: ["Nh4","Rf7","Nxg6"] }],
+    ref: ["Qd7+","Rf7"],
+    whyBad: "[[Qd7+]] to szach, ale niczego nie wygrywa. Czarne zasłaniają się wieżą [[Rf7]] i wszystko zostaje na swoim miejscu. Przewaga nadal jest decydująca (+7,5) i partię wygrałeś, ale przegapiłeś darmową wieżę i szybkiego mata.",
+    whyGood: "[[Qxf5]] bije wieżę. Wygląda na to, że broni jej pion g6, ale ten pion jest związany: stoi na linii g między Twoją wieżą g1 a czarnym królem g7. Gdyby zbił hetmana, odsłoniłby króla na szach, więc takie bicie jest nielegalne. Wieża przepada za darmo, a silnik widzi mata w 6 ruchach.",
+    look: ["Zanim uznasz figurę przeciwnika za obronioną, sprawdź, czy jej obrońca nie jest związany.", "Szach nie jest obowiązkowy. Zawsze porównaj go z biciami, które masz na planszy.", "Wieża na otwartej linii do króla wiąże każdą bierkę, która na tej linii stanie."]
   }
   ],
 
